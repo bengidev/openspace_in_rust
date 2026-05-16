@@ -13,10 +13,9 @@ const FEATURE_CRATES: &[&str] = &[
 ];
 
 fn parse_workspace_members() -> Vec<String> {
-    let root_cargo = fs::read_to_string(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../Cargo.toml"),
-    )
-    .expect("root Cargo.toml exists");
+    let root_cargo =
+        fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../Cargo.toml"))
+            .expect("root Cargo.toml exists");
 
     let doc = root_cargo.parse::<toml::Table>().expect("valid TOML");
     let members = doc["workspace"]["members"]
@@ -98,10 +97,7 @@ fn no_cycles_in_dependency_graph() {
 
     for member in &members {
         let deps = parse_crate_deps(member);
-        let internal_deps: Vec<String> = deps
-            .into_iter()
-            .filter(|d| members.contains(d))
-            .collect();
+        let internal_deps: Vec<String> = deps.into_iter().filter(|d| members.contains(d)).collect();
         graph.insert(member.clone(), internal_deps);
     }
 
@@ -117,10 +113,7 @@ fn no_feature_to_feature_lateral_dependencies() {
 
     for feature in FEATURE_CRATES {
         let deps = parse_crate_deps(feature);
-        let internal_deps: Vec<String> = deps
-            .into_iter()
-            .filter(|d| members.contains(d))
-            .collect();
+        let internal_deps: Vec<String> = deps.into_iter().filter(|d| members.contains(d)).collect();
 
         for dep in &internal_deps {
             if dep != "openspace-core" && feature_set.contains(dep) {

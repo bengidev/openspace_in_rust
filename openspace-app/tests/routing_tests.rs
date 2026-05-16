@@ -14,7 +14,11 @@ fn create_session_emits_event_and_sets_active() {
         descriptor: SessionDescriptor::new("test"),
     };
     let events = router.apply(cmd);
-    assert!(events.iter().any(|e| matches!(e, AppEvent::SessionCreated { .. })));
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, AppEvent::SessionCreated { .. }))
+    );
     assert!(router.active_session().is_some());
 }
 
@@ -33,7 +37,11 @@ fn switch_mode_emits_mode_changed() {
         mode: SessionMode::Chat,
     };
     let events = router.apply(cmd);
-    assert!(events.iter().any(|e| matches!(e, AppEvent::ModeChanged { .. })));
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, AppEvent::ModeChanged { .. }))
+    );
     assert_eq!(router.active_session().unwrap().mode, SessionMode::Chat);
 }
 
@@ -49,7 +57,11 @@ fn close_session_removes_and_emits_closed() {
 
     let cmd = AppCommand::CloseSession { session_id };
     let events = router.apply(cmd);
-    assert!(events.iter().any(|e| matches!(e, AppEvent::SessionClosed { .. })));
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, AppEvent::SessionClosed { .. }))
+    );
     assert!(router.active_session().is_none());
 }
 
@@ -96,8 +108,15 @@ fn update_permission_emits_permission_changed() {
         profile: PermissionProfile::FullAccess,
     };
     let events = router.apply(cmd);
-    assert!(events.iter().any(|e| matches!(e, AppEvent::PermissionChanged { .. })));
-    assert_eq!(router.active_session().unwrap().permission, PermissionProfile::FullAccess);
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, AppEvent::PermissionChanged { .. }))
+    );
+    assert_eq!(
+        router.active_session().unwrap().permission,
+        PermissionProfile::FullAccess
+    );
 }
 
 #[test]

@@ -29,7 +29,8 @@ impl AppRouter {
     }
 
     pub fn active_session_mut(&mut self) -> Option<&mut Session> {
-        self.active_session_id.and_then(|id| self.sessions.get_mut(&id))
+        self.active_session_id
+            .and_then(|id| self.sessions.get_mut(&id))
     }
 
     pub fn sessions(&self) -> &HashMap<Uuid, Session> {
@@ -100,7 +101,10 @@ impl AppRouter {
                     });
                 }
             }
-            AppCommand::UpdatePermission { session_id, profile } => {
+            AppCommand::UpdatePermission {
+                session_id,
+                profile,
+            } => {
                 if let Some(session) = self.sessions.get_mut(&session_id) {
                     session.permission = profile.clone();
                     events.push(AppEvent::PermissionChanged {
@@ -123,26 +127,24 @@ impl AppRouter {
             AppCommand::DispatchToFeature {
                 feature_id,
                 command,
-            } => {
-                match self.runtime_manager.dispatch(&feature_id, &command) {
-                    Ok(()) => {
-                        events.push(AppEvent::FeatureLifecycle {
-                            feature_id,
-                            state: match command {
-                                FeatureCommand::Activate => FeatureLifecycleState::Ready,
-                                FeatureCommand::Deactivate => FeatureLifecycleState::Stopped,
-                                _ => FeatureLifecycleState::Ready,
-                            },
-                        });
-                    }
-                    Err(e) => {
-                        events.push(AppEvent::Error {
-                            session_id: self.active_session_id,
-                            error: e,
-                        });
-                    }
+            } => match self.runtime_manager.dispatch(&feature_id, &command) {
+                Ok(()) => {
+                    events.push(AppEvent::FeatureLifecycle {
+                        feature_id,
+                        state: match command {
+                            FeatureCommand::Activate => FeatureLifecycleState::Ready,
+                            FeatureCommand::Deactivate => FeatureLifecycleState::Stopped,
+                            _ => FeatureLifecycleState::Ready,
+                        },
+                    });
                 }
-            }
+                Err(e) => {
+                    events.push(AppEvent::Error {
+                        session_id: self.active_session_id,
+                        error: e,
+                    });
+                }
+            },
             AppCommand::Storage(cmd) => match cmd {
                 StorageCommand::SaveSession { session_id } => {
                     events.push(AppEvent::Audit {

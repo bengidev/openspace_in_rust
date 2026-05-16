@@ -1,2 +1,2 @@
-pub mod git_repo;
 pub mod git_diff;
+pub mod git_repo;
