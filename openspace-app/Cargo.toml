@@ -1,0 +1,29 @@
+[package]
+name = "openspace-app"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+iced = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+openspace-core = { path = "../openspace-core" }
+openspace-theme = { path = "../openspace-theme" }
+openspace-platform = { path = "../openspace-platform" }
+openspace-storage = { path = "../openspace-storage" }
+openspace-secrets = { path = "../openspace-secrets" }
+openspace-terminal = { path = "../openspace-terminal" }
+openspace-chat = { path = "../openspace-chat" }
+openspace-ai = { path = "../openspace-ai" }
+openspace-editor = { path = "../openspace-editor" }
+openspace-lsp = { path = "../openspace-lsp" }
+openspace-fs = { path = "../openspace-fs" }
+openspace-git = { path = "../openspace-git" }
+
+[dev-dependencies]
+toml = "0.8"
+
+[[bin]]
+name = "openspace"
+path = "src/main.rs"
