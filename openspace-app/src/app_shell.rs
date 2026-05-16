@@ -15,17 +15,17 @@ const MIN_PANEL_WIDTH: f32 = 100.0;
 const MIN_CENTER_WIDTH: f32 = 200.0;
 const HIT_MARGIN: f32 = 3.0;
 
-/// Minimum total window width agar layout tidak collapse.
+/// Minimum total window width so the layout does not collapse.
 /// 2 panel + center + 2 separator
 const MIN_WINDOW_WIDTH: f32 =
     MIN_PANEL_WIDTH * 2.0 + MIN_CENTER_WIDTH + 2.0 * SEPARATOR_SIZE;
 
 #[derive(Debug)]
 pub struct AppShell {
-    /// Preferred width = user intent (dari drag resize). Tidak di-clamp.
+    /// Preferred width = user intent (from drag resize). Not clamped.
     preferred_left_width: f32,
     preferred_right_width: f32,
-    /// Actual width = preferred di-clamp ke available space.
+    /// Actual width = preferred clamped to available space.
     left_width: f32,
     right_width: f32,
     window_size: Size,
@@ -96,7 +96,7 @@ fn subscription(_state: &AppShell) -> Subscription<Message> {
     iced::event::listen().map(Message::EventOccurred)
 }
 
-/// Clamp panel width ke available space dari window width saat ini.
+/// Clamp panel width to the available space from the current window width.
 fn clamp_panel(preferred: f32, window_width: f32, other_panel: f32) -> f32 {
     let max = window_width - other_panel - MIN_CENTER_WIDTH - 2.0 * SEPARATOR_SIZE;
     preferred.clamp(MIN_PANEL_WIDTH, max.max(MIN_PANEL_WIDTH))
@@ -112,9 +112,9 @@ fn update(state: &mut AppShell, message: Message) -> Task<Message> {
         }
         Message::EventOccurred(event) => match event {
             Event::Window(iced::window::Event::Resized(size)) => {
-                // Guard: abaikan dimensi sementara tidak wajar dari macOS
-                // fullscreen transition. Kadang winit kirim 0x0 atau nilai
-                // terlalu kecil sebelum ukuran final.
+                // Guard: ignore transient invalid dimensions from macOS
+                // fullscreen transition. Sometimes winit sends 0x0 or a
+                // value too small before the final size.
                 if size.width < MIN_WINDOW_WIDTH
                     || size.height
                         < TOP_BAR_HEIGHT + STATUS_BAR_HEIGHT + SEPARATOR_SIZE * 2.0 + 10.0
