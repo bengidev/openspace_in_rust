@@ -24,7 +24,9 @@ impl std::fmt::Debug for RuntimeManager {
 
 impl RuntimeManager {
     pub fn new() -> Self {
-        Self { runtimes: Vec::new() }
+        Self {
+            runtimes: Vec::new(),
+        }
     }
 
     pub fn register(&mut self, runtime: Box<dyn FeatureRuntime>) {

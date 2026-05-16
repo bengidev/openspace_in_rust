@@ -1,9 +1,10 @@
 use iced::alignment::{Horizontal, Vertical};
-use iced::widget::{button, container, mouse_area, text, Column, Row};
-use iced::{mouse, Element, Event, Length, Point, Size, Subscription, Task, Theme};
+use iced::widget::{Column, Row, button, container, mouse_area, text};
+use iced::{Element, Event, Length, Point, Size, Subscription, Task, Theme, mouse};
 use openspace_core::app_command::AppCommand;
 use openspace_core::session::{SessionDescriptor, SessionMode};
-use openspace_theme::theme_styles::ThemeColors;
+use openspace_theme::theme::OpenSpaceTheme;
+use openspace_theme::tokens::*;
 
 use crate::app_router::AppRouter;
 use crate::center_surface::center_surface;
@@ -17,8 +18,7 @@ const HIT_MARGIN: f32 = 3.0;
 
 /// Minimum total window width so the layout does not collapse.
 /// 2 panel + center + 2 separator
-const MIN_WINDOW_WIDTH: f32 =
-    MIN_PANEL_WIDTH * 2.0 + MIN_CENTER_WIDTH + 2.0 * SEPARATOR_SIZE;
+const MIN_WINDOW_WIDTH: f32 = MIN_PANEL_WIDTH * 2.0 + MIN_CENTER_WIDTH + 2.0 * SEPARATOR_SIZE;
 
 #[derive(Debug)]
 pub struct AppShell {
@@ -32,24 +32,21 @@ pub struct AppShell {
     mouse_position: Option<Point>,
     drag: Option<DragState>,
     router: AppRouter,
+    theme: OpenSpaceTheme,
+    theme_mode: ThemeMode,
 }
 
 #[derive(Debug, Clone)]
 enum DragState {
-    Left {
-        start_x: f32,
-        start_width: f32,
-    },
-    Right {
-        start_x: f32,
-        start_width: f32,
-    },
+    Left { start_x: f32, start_width: f32 },
+    Right { start_x: f32, start_width: f32 },
 }
 
 #[derive(Debug, Clone)]
 pub enum Message {
     EventOccurred(Event),
     AppCommand(AppCommand),
+    ToggleTheme,
 }
 
 impl Default for AppShell {
@@ -64,6 +61,8 @@ impl Default for AppShell {
             mouse_position: None,
             drag: None,
             router: AppRouter::new(),
+            theme: OpenSpaceTheme::dark(),
+            theme_mode: ThemeMode::Dark,
         }
     }
 }
@@ -82,10 +81,10 @@ pub fn run() -> iced::Result {
 
     iced::application(AppShell::default, update, view)
         .title("OpenSpace")
-        .theme(Theme::Dark)
-        .style(|_state, _theme| iced::theme::Style {
-            background_color: ThemeColors::BG,
-            text_color: ThemeColors::FG,
+        .theme(|shell: &AppShell| shell.theme.to_iced_theme())
+        .style(|shell, _theme| iced::theme::Style {
+            background_color: shell.theme.background(BackgroundToken::Primary),
+            text_color: shell.theme.foreground(ForegroundToken::Primary),
         })
         .window(window)
         .subscription(subscription)
@@ -104,6 +103,13 @@ fn clamp_panel(preferred: f32, window_width: f32, other_panel: f32) -> f32 {
 
 fn update(state: &mut AppShell, message: Message) -> Task<Message> {
     match message {
+        Message::ToggleTheme => {
+            state.theme_mode = match state.theme_mode {
+                ThemeMode::Dark => ThemeMode::Light,
+                ThemeMode::Light => ThemeMode::Dark,
+            };
+            state.theme = OpenSpaceTheme::from_mode(state.theme_mode);
+        }
         Message::AppCommand(cmd) => {
             let events = state.router.apply(cmd);
             for event in events {
@@ -199,17 +205,34 @@ fn update(state: &mut AppShell, message: Message) -> Task<Message> {
 }
 
 fn view(state: &AppShell) -> Element<'_, Message> {
+    let theme = state.theme;
+
     let top_bar = top_bar_view(state);
-    let status_bar = region_container("StatusBar", Length::Fill, Length::Fixed(STATUS_BAR_HEIGHT));
-    let left_panel = region_container("LeftPanel", Length::Fixed(state.left_width), Length::Fill);
-    let right_panel =
-        region_container("RightPanel", Length::Fixed(state.right_width), Length::Fill);
+    let status_bar = region_container(
+        "StatusBar",
+        Length::Fill,
+        Length::Fixed(STATUS_BAR_HEIGHT),
+        theme,
+    );
+    let left_panel = region_container(
+        "LeftPanel",
+        Length::Fixed(state.left_width),
+        Length::Fill,
+        theme,
+    );
+    let right_panel = region_container(
+        "RightPanel",
+        Length::Fixed(state.right_width),
+        Length::Fill,
+        theme,
+    );
 
     let center_width =
         state.window_size.width - state.left_width - state.right_width - 2.0 * SEPARATOR_SIZE;
     let center_width = center_width.max(MIN_CENTER_WIDTH);
     let center_view: Element<'_, Message> = container(center_surface(
         state.router.active_session().map(|s| &s.mode),
+        theme,
     ))
     .width(Length::Fixed(center_width))
     .height(Length::Fill)
@@ -234,8 +257,8 @@ fn view(state: &AppShell) -> Element<'_, Message> {
     let is_dragging_left = matches!(state.drag, Some(DragState::Left { .. }));
     let is_dragging_right = matches!(state.drag, Some(DragState::Right { .. }));
 
-    let left_sep = resize_handle(is_hovering_left || is_dragging_left);
-    let right_sep = resize_handle(is_hovering_right || is_dragging_right);
+    let left_sep = resize_handle(is_hovering_left || is_dragging_left, theme);
+    let right_sep = resize_handle(is_hovering_right || is_dragging_right, theme);
 
     let middle = Row::new()
         .push(left_panel)
@@ -248,9 +271,9 @@ fn view(state: &AppShell) -> Element<'_, Message> {
 
     Column::new()
         .push(top_bar)
-        .push(horizontal_separator())
+        .push(horizontal_separator(theme))
         .push(middle)
-        .push(horizontal_separator())
+        .push(horizontal_separator(theme))
         .push(status_bar)
         .height(Length::Fill)
         .width(Length::Fill)
@@ -258,6 +281,8 @@ fn view(state: &AppShell) -> Element<'_, Message> {
 }
 
 fn top_bar_view<'a>(state: &'a AppShell) -> Element<'a, Message> {
+    let theme = state.theme;
+
     let mut row = Row::new()
         .height(Length::Fill)
         .align_y(Vertical::Center)
@@ -266,8 +291,8 @@ fn top_bar_view<'a>(state: &'a AppShell) -> Element<'a, Message> {
     row = row.push(
         text("OpenSpace")
             .size(16)
-            .style(|_theme: &Theme| text::Style {
-                color: Some(ThemeColors::FG),
+            .style(move |_theme: &Theme| text::Style {
+                color: Some(theme.foreground(ForegroundToken::Primary)),
             }),
     );
 
@@ -278,7 +303,11 @@ fn top_bar_view<'a>(state: &'a AppShell) -> Element<'a, Message> {
             .into();
         row = row.push(spacer);
 
-        for mode in [SessionMode::Terminal, SessionMode::Chat, SessionMode::Editor] {
+        for mode in [
+            SessionMode::Terminal,
+            SessionMode::Chat,
+            SessionMode::Editor,
+        ] {
             let label = format!("{:?}", mode);
             let is_active = session.mode == mode;
             let btn = button(
@@ -286,9 +315,9 @@ fn top_bar_view<'a>(state: &'a AppShell) -> Element<'a, Message> {
                     .size(13)
                     .style(move |_theme: &Theme| text::Style {
                         color: Some(if is_active {
-                            ThemeColors::ACCENT_TEXT
+                            theme.foreground(ForegroundToken::Primary)
                         } else {
-                            ThemeColors::FG
+                            theme.foreground(ForegroundToken::Primary)
                         }),
                     }),
             )
@@ -297,44 +326,54 @@ fn top_bar_view<'a>(state: &'a AppShell) -> Element<'a, Message> {
                 session_id: session.id,
                 mode,
             }))
-            .style(move |_theme: &Theme, status: iced::widget::button::Status| {
-                let mut base = button::Style {
-                    background: if is_active {
-                        Some(iced::Background::Color(ThemeColors::ACCENT))
-                    } else {
-                        Some(iced::Background::Color(ThemeColors::SURFACE))
-                    },
-                    text_color: if is_active {
-                        ThemeColors::ACCENT_TEXT
-                    } else {
-                        ThemeColors::FG
-                    },
-                    border: iced::Border {
-                        radius: 4.0.into(),
-                        width: if is_active { 0.0 } else { 1.0 },
-                        color: if is_active {
-                            iced::Color::TRANSPARENT
+            .style(
+                move |_theme: &Theme, status: iced::widget::button::Status| {
+                    let mut base = button::Style {
+                        background: if is_active {
+                            Some(iced::Background::Color(
+                                theme.foreground(ForegroundToken::Accent),
+                            ))
                         } else {
-                            ThemeColors::BORDER
+                            Some(iced::Background::Color(
+                                theme.background(BackgroundToken::Tertiary),
+                            ))
                         },
-                    },
-                    ..Default::default()
-                };
-                if !is_active {
-                    base = match status {
-                        iced::widget::button::Status::Hovered => button::Style {
-                            background: Some(iced::Background::Color(ThemeColors::ELEVATED_SURFACE)),
-                            ..base
+                        text_color: if is_active {
+                            theme.foreground(ForegroundToken::Primary)
+                        } else {
+                            theme.foreground(ForegroundToken::Primary)
                         },
-                        iced::widget::button::Status::Pressed => button::Style {
-                            background: Some(iced::Background::Color(ThemeColors::BG_SECONDARY)),
-                            ..base
+                        border: iced::Border {
+                            radius: 4.0.into(),
+                            width: if is_active { 0.0 } else { 1.0 },
+                            color: if is_active {
+                                iced::Color::TRANSPARENT
+                            } else {
+                                theme.border(BorderToken::Default)
+                            },
                         },
-                        _ => base,
+                        ..Default::default()
                     };
-                }
-                base
-            });
+                    if !is_active {
+                        base = match status {
+                            iced::widget::button::Status::Hovered => button::Style {
+                                background: Some(iced::Background::Color(
+                                    theme.background(BackgroundToken::Elevated),
+                                )),
+                                ..base
+                            },
+                            iced::widget::button::Status::Pressed => button::Style {
+                                background: Some(iced::Background::Color(
+                                    theme.background(BackgroundToken::Secondary),
+                                )),
+                                ..base
+                            },
+                            _ => base,
+                        };
+                    }
+                    base
+                },
+            );
             row = row.push(btn);
 
             // small gap between mode buttons
@@ -352,47 +391,108 @@ fn top_bar_view<'a>(state: &'a AppShell) -> Element<'a, Message> {
             .height(Length::Shrink)
             .into();
         row = row.push(spacer);
-        let new_btn = button(
-            text("New Session")
-                .size(13)
-                .style(|_theme: &Theme| text::Style {
-                    color: Some(ThemeColors::PRIMARY_TEXT),
-                }),
-        )
-        .padding([8, 16])
-        .on_press(Message::AppCommand(AppCommand::CreateSession {
-            project_folder: std::env::current_dir()
-                .unwrap_or_else(|_| std::path::PathBuf::from(".")),
-            descriptor: SessionDescriptor::new("Untitled"),
-        }))
-        .style(|_theme: &Theme, _status| button::Style {
-            background: Some(iced::Background::Color(ThemeColors::PRIMARY_FILL)),
-            text_color: ThemeColors::PRIMARY_TEXT,
-            border: iced::Border {
-                radius: 4.0.into(),
-                width: 0.0,
-                color: iced::Color::TRANSPARENT,
-            },
-            ..Default::default()
-        });
+        let new_btn =
+            button(
+                text("New Session")
+                    .size(13)
+                    .style(move |_theme: &Theme| text::Style {
+                        color: Some(theme.background(BackgroundToken::Primary)),
+                    }),
+            )
+            .padding([8, 16])
+            .on_press(Message::AppCommand(AppCommand::CreateSession {
+                project_folder: std::env::current_dir()
+                    .unwrap_or_else(|_| std::path::PathBuf::from(".")),
+                descriptor: SessionDescriptor::new("Untitled"),
+            }))
+            .style(move |_theme: &Theme, _status| button::Style {
+                background: Some(iced::Background::Color(
+                    theme.foreground(ForegroundToken::Primary),
+                )),
+                text_color: theme.background(BackgroundToken::Primary),
+                border: iced::Border {
+                    radius: 4.0.into(),
+                    width: 0.0,
+                    color: iced::Color::TRANSPARENT,
+                },
+                ..Default::default()
+            });
         row = row.push(new_btn);
     }
+
+    // Theme toggle — always at the far right
+    let toggle_label = match state.theme_mode {
+        ThemeMode::Dark => "\u{2600}",   // sun
+        ThemeMode::Light => "\u{1F319}", // moon
+    };
+
+    // gap before toggle so it doesn't crowd the preceding button
+    let toggle_gap: Element<'_, Message> = container(iced::widget::Space::new())
+        .width(Length::Fixed(8.0))
+        .height(Length::Shrink)
+        .into();
+    row = row.push(toggle_gap);
+
+    let toggle_btn = button(
+        text(toggle_label)
+            .size(13)
+            .style(move |_theme: &Theme| text::Style {
+                color: Some(theme.foreground(ForegroundToken::Primary)),
+            }),
+    )
+    .padding([8, 16])
+    .on_press(Message::ToggleTheme)
+    .style(
+        move |_theme: &Theme, status: iced::widget::button::Status| {
+            let mut base = button::Style {
+                background: Some(iced::Background::Color(
+                    theme.background(BackgroundToken::Tertiary),
+                )),
+                text_color: theme.foreground(ForegroundToken::Primary),
+                border: iced::Border {
+                    radius: 4.0.into(),
+                    width: 1.0,
+                    color: theme.border(BorderToken::Default),
+                },
+                ..Default::default()
+            };
+            base = match status {
+                iced::widget::button::Status::Hovered => button::Style {
+                    background: Some(iced::Background::Color(
+                        theme.background(BackgroundToken::Elevated),
+                    )),
+                    ..base
+                },
+                iced::widget::button::Status::Pressed => button::Style {
+                    background: Some(iced::Background::Color(
+                        theme.background(BackgroundToken::Secondary),
+                    )),
+                    ..base
+                },
+                _ => base,
+            };
+            base
+        },
+    );
+    row = row.push(toggle_btn);
 
     container(row)
         .width(Length::Fill)
         .height(Length::Fixed(TOP_BAR_HEIGHT))
-        .style(|_theme: &Theme| container::Style {
-            background: Some(iced::Background::Color(ThemeColors::BG)),
+        .style(move |_theme: &Theme| container::Style {
+            background: Some(iced::Background::Color(
+                theme.background(BackgroundToken::Primary),
+            )),
             ..Default::default()
         })
         .into()
 }
 
-fn resize_handle<'a>(is_active: bool) -> Element<'a, Message> {
+fn resize_handle<'a>(is_active: bool, theme: OpenSpaceTheme) -> Element<'a, Message> {
     let color = if is_active {
-        ThemeColors::ACCENT
+        theme.foreground(ForegroundToken::Accent)
     } else {
-        ThemeColors::BORDER
+        theme.border(BorderToken::Default)
     };
     mouse_area(
         container(iced::widget::Space::new())
@@ -411,25 +511,28 @@ fn region_container<'a>(
     label: &'a str,
     width: impl Into<Length>,
     height: impl Into<Length>,
+    theme: OpenSpaceTheme,
 ) -> iced::widget::Container<'a, Message> {
     container(text(label).size(14).center())
         .width(width)
         .height(height)
         .align_x(Horizontal::Center)
         .align_y(Vertical::Center)
-        .style(|_theme: &Theme| container::Style {
-            background: Some(iced::Background::Color(ThemeColors::BG)),
-            text_color: Some(ThemeColors::FG_MUTED),
+        .style(move |_theme: &Theme| container::Style {
+            background: Some(iced::Background::Color(
+                theme.background(BackgroundToken::Primary),
+            )),
+            text_color: Some(theme.foreground(ForegroundToken::Muted)),
             ..Default::default()
         })
 }
 
-fn horizontal_separator<'a>() -> iced::widget::Container<'a, Message> {
+fn horizontal_separator<'a>(theme: OpenSpaceTheme) -> iced::widget::Container<'a, Message> {
     container(iced::widget::Space::new())
         .width(Length::Fill)
         .height(Length::Fixed(SEPARATOR_SIZE))
-        .style(|_theme: &Theme| container::Style {
-            background: Some(iced::Background::Color(ThemeColors::BORDER)),
+        .style(move |_theme: &Theme| container::Style {
+            background: Some(iced::Background::Color(theme.border(BorderToken::Default))),
             ..Default::default()
         })
 }

@@ -2,49 +2,58 @@ use iced::alignment::{Horizontal, Vertical};
 use iced::widget::{container, text};
 use iced::{Element, Length, Theme};
 use openspace_core::session::SessionMode;
-use openspace_theme::theme_styles::ThemeColors;
+use openspace_theme::theme::OpenSpaceTheme;
+use openspace_theme::tokens::*;
 
-pub fn center_surface<'a, Message: 'a>(mode: Option<&SessionMode>) -> Element<'a, Message> {
+pub fn center_surface<'a, Message: 'a>(
+    mode: Option<&SessionMode>,
+    theme: OpenSpaceTheme,
+) -> Element<'a, Message> {
     let content: Element<'a, Message> = match mode {
-        Some(SessionMode::Terminal) => terminal_workspace_view(),
-        Some(SessionMode::Chat) => chat_workflow_view(),
-        Some(SessionMode::Editor) => editor_workspace_view(),
-        None => empty_center_view(),
+        Some(SessionMode::Terminal) => terminal_workspace_view(theme),
+        Some(SessionMode::Chat) => chat_workflow_view(theme),
+        Some(SessionMode::Editor) => editor_workspace_view(theme),
+        None => empty_center_view(theme),
     };
     container(content)
         .width(Length::Fill)
         .height(Length::Fill)
         .align_x(Horizontal::Center)
         .align_y(Vertical::Center)
-        .style(|_theme: &Theme| container::Style {
-            background: Some(iced::Background::Color(ThemeColors::BG)),
+        .style(move |_theme: &Theme| container::Style {
+            background: Some(iced::Background::Color(
+                theme.background(BackgroundToken::Primary),
+            )),
             ..Default::default()
         })
         .into()
 }
 
-fn terminal_workspace_view<'a, Message: 'a>() -> Element<'a, Message> {
-    placeholder_view("TerminalWorkspaceView")
+fn terminal_workspace_view<'a, Message: 'a>(theme: OpenSpaceTheme) -> Element<'a, Message> {
+    placeholder_view("TerminalWorkspaceView", theme)
 }
 
-fn chat_workflow_view<'a, Message: 'a>() -> Element<'a, Message> {
-    placeholder_view("ChatWorkflowView")
+fn chat_workflow_view<'a, Message: 'a>(theme: OpenSpaceTheme) -> Element<'a, Message> {
+    placeholder_view("ChatWorkflowView", theme)
 }
 
-fn editor_workspace_view<'a, Message: 'a>() -> Element<'a, Message> {
-    placeholder_view("EditorWorkspaceView")
+fn editor_workspace_view<'a, Message: 'a>(theme: OpenSpaceTheme) -> Element<'a, Message> {
+    placeholder_view("EditorWorkspaceView", theme)
 }
 
-fn empty_center_view<'a, Message: 'a>() -> Element<'a, Message> {
-    placeholder_view("No Active Session")
+fn empty_center_view<'a, Message: 'a>(theme: OpenSpaceTheme) -> Element<'a, Message> {
+    placeholder_view("No Active Session", theme)
 }
 
-fn placeholder_view<'a, Message: 'a>(label: &'static str) -> Element<'a, Message> {
+fn placeholder_view<'a, Message: 'a>(
+    label: &'static str,
+    theme: OpenSpaceTheme,
+) -> Element<'a, Message> {
     container(
         text(label)
             .size(18)
-            .style(|_theme: &Theme| text::Style {
-                color: Some(ThemeColors::FG_MUTED),
+            .style(move |_theme: &Theme| text::Style {
+                color: Some(theme.foreground(ForegroundToken::Muted)),
             }),
     )
     .width(Length::Fill)

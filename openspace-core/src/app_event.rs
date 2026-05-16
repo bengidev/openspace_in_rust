@@ -14,11 +14,30 @@ pub enum FeatureLifecycleState {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AppEvent {
-    SessionCreated { session_id: Uuid },
-    SessionClosed { session_id: Uuid },
-    ModeChanged { session_id: Uuid, new_mode: SessionMode },
-    PermissionChanged { session_id: Uuid, new_profile: PermissionProfile },
-    FeatureLifecycle { feature_id: String, state: FeatureLifecycleState },
-    Audit { action: String, session_id: Uuid },
-    Error { session_id: Option<Uuid>, error: CoreError },
+    SessionCreated {
+        session_id: Uuid,
+    },
+    SessionClosed {
+        session_id: Uuid,
+    },
+    ModeChanged {
+        session_id: Uuid,
+        new_mode: SessionMode,
+    },
+    PermissionChanged {
+        session_id: Uuid,
+        new_profile: PermissionProfile,
+    },
+    FeatureLifecycle {
+        feature_id: String,
+        state: FeatureLifecycleState,
+    },
+    Audit {
+        action: String,
+        session_id: Uuid,
+    },
+    Error {
+        session_id: Option<Uuid>,
+        error: CoreError,
+    },
 }
