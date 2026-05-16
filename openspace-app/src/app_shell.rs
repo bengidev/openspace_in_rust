@@ -1,7 +1,12 @@
 use iced::alignment::{Horizontal, Vertical};
-use iced::widget::{container, mouse_area, text, Column, Row};
+use iced::widget::{button, container, mouse_area, text, Column, Row};
 use iced::{mouse, Element, Event, Length, Point, Size, Subscription, Task, Theme};
+use openspace_core::app_command::AppCommand;
+use openspace_core::session::{SessionDescriptor, SessionMode};
 use openspace_theme::theme_styles::ThemeColors;
+
+use crate::app_router::AppRouter;
+use crate::center_surface::center_surface;
 
 const TOP_BAR_HEIGHT: f32 = 48.0;
 const STATUS_BAR_HEIGHT: f32 = 28.0;
@@ -12,7 +17,8 @@ const HIT_MARGIN: f32 = 3.0;
 
 /// Minimum total window width agar layout tidak collapse.
 /// 2 panel + center + 2 separator
-const MIN_WINDOW_WIDTH: f32 = MIN_PANEL_WIDTH * 2.0 + MIN_CENTER_WIDTH + 2.0 * SEPARATOR_SIZE;
+const MIN_WINDOW_WIDTH: f32 =
+    MIN_PANEL_WIDTH * 2.0 + MIN_CENTER_WIDTH + 2.0 * SEPARATOR_SIZE;
 
 #[derive(Debug)]
 pub struct AppShell {
@@ -25,17 +31,25 @@ pub struct AppShell {
     window_size: Size,
     mouse_position: Option<Point>,
     drag: Option<DragState>,
+    router: AppRouter,
 }
 
 #[derive(Debug, Clone)]
 enum DragState {
-    Left { start_x: f32, start_width: f32 },
-    Right { start_x: f32, start_width: f32 },
+    Left {
+        start_x: f32,
+        start_width: f32,
+    },
+    Right {
+        start_x: f32,
+        start_width: f32,
+    },
 }
 
 #[derive(Debug, Clone)]
 pub enum Message {
     EventOccurred(Event),
+    AppCommand(AppCommand),
 }
 
 impl Default for AppShell {
@@ -49,6 +63,7 @@ impl Default for AppShell {
             window_size: Size::new(1280.0, 800.0),
             mouse_position: None,
             drag: None,
+            router: AppRouter::new(),
         }
     }
 }
@@ -89,12 +104,21 @@ fn clamp_panel(preferred: f32, window_width: f32, other_panel: f32) -> f32 {
 
 fn update(state: &mut AppShell, message: Message) -> Task<Message> {
     match message {
+        Message::AppCommand(cmd) => {
+            let events = state.router.apply(cmd);
+            for event in events {
+                tracing::debug!(?event, "app_event");
+            }
+        }
         Message::EventOccurred(event) => match event {
             Event::Window(iced::window::Event::Resized(size)) => {
                 // Guard: abaikan dimensi sementara tidak wajar dari macOS
                 // fullscreen transition. Kadang winit kirim 0x0 atau nilai
                 // terlalu kecil sebelum ukuran final.
-                if size.width < MIN_WINDOW_WIDTH || size.height < TOP_BAR_HEIGHT + STATUS_BAR_HEIGHT + SEPARATOR_SIZE * 2.0 + 10.0 {
+                if size.width < MIN_WINDOW_WIDTH
+                    || size.height
+                        < TOP_BAR_HEIGHT + STATUS_BAR_HEIGHT + SEPARATOR_SIZE * 2.0 + 10.0
+                {
                     return Task::none();
                 }
                 state.window_size = size;
@@ -114,7 +138,10 @@ fn update(state: &mut AppShell, message: Message) -> Task<Message> {
                     state.mouse_position = Some(position);
                     if let Some(drag) = &state.drag {
                         match drag {
-                            DragState::Left { start_x, start_width } => {
+                            DragState::Left {
+                                start_x,
+                                start_width,
+                            } => {
                                 let delta = position.x - start_x;
                                 let new_preferred = (start_width + delta).max(MIN_PANEL_WIDTH);
                                 state.preferred_left_width = new_preferred;
@@ -124,7 +151,10 @@ fn update(state: &mut AppShell, message: Message) -> Task<Message> {
                                     state.right_width,
                                 );
                             }
-                            DragState::Right { start_x, start_width } => {
+                            DragState::Right {
+                                start_x,
+                                start_width,
+                            } => {
                                 let delta = position.x - start_x;
                                 let new_preferred = (start_width - delta).max(MIN_PANEL_WIDTH);
                                 state.preferred_right_width = new_preferred;
@@ -169,17 +199,21 @@ fn update(state: &mut AppShell, message: Message) -> Task<Message> {
 }
 
 fn view(state: &AppShell) -> Element<'_, Message> {
-    let top_bar = region_container("TopBar", Length::Fill, Length::Fixed(TOP_BAR_HEIGHT));
+    let top_bar = top_bar_view(state);
     let status_bar = region_container("StatusBar", Length::Fill, Length::Fixed(STATUS_BAR_HEIGHT));
     let left_panel = region_container("LeftPanel", Length::Fixed(state.left_width), Length::Fill);
-    let right_panel = region_container("RightPanel", Length::Fixed(state.right_width), Length::Fill);
+    let right_panel =
+        region_container("RightPanel", Length::Fixed(state.right_width), Length::Fill);
 
-    let center_width = state.window_size.width
-        - state.left_width
-        - state.right_width
-        - 2.0 * SEPARATOR_SIZE;
+    let center_width =
+        state.window_size.width - state.left_width - state.right_width - 2.0 * SEPARATOR_SIZE;
     let center_width = center_width.max(MIN_CENTER_WIDTH);
-    let center_surface = region_container("CenterSurface", Length::Fixed(center_width), Length::Fill);
+    let center_view: Element<'_, Message> = container(center_surface(
+        state.router.active_session().map(|s| &s.mode),
+    ))
+    .width(Length::Fixed(center_width))
+    .height(Length::Fill)
+    .into();
 
     let is_hovering_left = state
         .mouse_position
@@ -187,7 +221,14 @@ fn view(state: &AppShell) -> Element<'_, Message> {
         .unwrap_or(false);
     let is_hovering_right = state
         .mouse_position
-        .map(|p| is_over_right_sep(p, state.window_size.width, state.right_width, state.window_size.height))
+        .map(|p| {
+            is_over_right_sep(
+                p,
+                state.window_size.width,
+                state.right_width,
+                state.window_size.height,
+            )
+        })
         .unwrap_or(false);
 
     let is_dragging_left = matches!(state.drag, Some(DragState::Left { .. }));
@@ -199,7 +240,7 @@ fn view(state: &AppShell) -> Element<'_, Message> {
     let middle = Row::new()
         .push(left_panel)
         .push(left_sep)
-        .push(center_surface)
+        .push(center_view)
         .push(right_sep)
         .push(right_panel)
         .height(Length::Fill)
@@ -213,6 +254,137 @@ fn view(state: &AppShell) -> Element<'_, Message> {
         .push(status_bar)
         .height(Length::Fill)
         .width(Length::Fill)
+        .into()
+}
+
+fn top_bar_view<'a>(state: &'a AppShell) -> Element<'a, Message> {
+    let mut row = Row::new()
+        .height(Length::Fill)
+        .align_y(Vertical::Center)
+        .padding([0, 12]);
+
+    row = row.push(
+        text("OpenSpace")
+            .size(16)
+            .style(|_theme: &Theme| text::Style {
+                color: Some(ThemeColors::FG),
+            }),
+    );
+
+    if let Some(session) = state.router.active_session() {
+        let spacer: Element<'_, Message> = container(iced::widget::Space::new())
+            .width(Length::Fill)
+            .height(Length::Shrink)
+            .into();
+        row = row.push(spacer);
+
+        for mode in [SessionMode::Terminal, SessionMode::Chat, SessionMode::Editor] {
+            let label = format!("{:?}", mode);
+            let is_active = session.mode == mode;
+            let btn = button(
+                text(label)
+                    .size(13)
+                    .style(move |_theme: &Theme| text::Style {
+                        color: Some(if is_active {
+                            ThemeColors::ACCENT_TEXT
+                        } else {
+                            ThemeColors::FG
+                        }),
+                    }),
+            )
+            .padding([8, 16])
+            .on_press(Message::AppCommand(AppCommand::SwitchMode {
+                session_id: session.id,
+                mode,
+            }))
+            .style(move |_theme: &Theme, status: iced::widget::button::Status| {
+                let mut base = button::Style {
+                    background: if is_active {
+                        Some(iced::Background::Color(ThemeColors::ACCENT))
+                    } else {
+                        Some(iced::Background::Color(ThemeColors::SURFACE))
+                    },
+                    text_color: if is_active {
+                        ThemeColors::ACCENT_TEXT
+                    } else {
+                        ThemeColors::FG
+                    },
+                    border: iced::Border {
+                        radius: 4.0.into(),
+                        width: if is_active { 0.0 } else { 1.0 },
+                        color: if is_active {
+                            iced::Color::TRANSPARENT
+                        } else {
+                            ThemeColors::BORDER
+                        },
+                    },
+                    ..Default::default()
+                };
+                if !is_active {
+                    base = match status {
+                        iced::widget::button::Status::Hovered => button::Style {
+                            background: Some(iced::Background::Color(ThemeColors::ELEVATED_SURFACE)),
+                            ..base
+                        },
+                        iced::widget::button::Status::Pressed => button::Style {
+                            background: Some(iced::Background::Color(ThemeColors::BG_SECONDARY)),
+                            ..base
+                        },
+                        _ => base,
+                    };
+                }
+                base
+            });
+            row = row.push(btn);
+
+            // small gap between mode buttons
+            if mode != SessionMode::Editor {
+                let gap: Element<'_, Message> = container(iced::widget::Space::new())
+                    .width(Length::Fixed(4.0))
+                    .height(Length::Shrink)
+                    .into();
+                row = row.push(gap);
+            }
+        }
+    } else {
+        let spacer: Element<'_, Message> = container(iced::widget::Space::new())
+            .width(Length::Fill)
+            .height(Length::Shrink)
+            .into();
+        row = row.push(spacer);
+        let new_btn = button(
+            text("New Session")
+                .size(13)
+                .style(|_theme: &Theme| text::Style {
+                    color: Some(ThemeColors::PRIMARY_TEXT),
+                }),
+        )
+        .padding([8, 16])
+        .on_press(Message::AppCommand(AppCommand::CreateSession {
+            project_folder: std::env::current_dir()
+                .unwrap_or_else(|_| std::path::PathBuf::from(".")),
+            descriptor: SessionDescriptor::new("Untitled"),
+        }))
+        .style(|_theme: &Theme, _status| button::Style {
+            background: Some(iced::Background::Color(ThemeColors::PRIMARY_FILL)),
+            text_color: ThemeColors::PRIMARY_TEXT,
+            border: iced::Border {
+                radius: 4.0.into(),
+                width: 0.0,
+                color: iced::Color::TRANSPARENT,
+            },
+            ..Default::default()
+        });
+        row = row.push(new_btn);
+    }
+
+    container(row)
+        .width(Length::Fill)
+        .height(Length::Fixed(TOP_BAR_HEIGHT))
+        .style(|_theme: &Theme| container::Style {
+            background: Some(iced::Background::Color(ThemeColors::BG)),
+            ..Default::default()
+        })
         .into()
 }
 
@@ -266,10 +438,7 @@ fn is_over_left_sep(point: Point, left_width: f32, window_height: f32) -> bool {
     let x = left_width + SEPARATOR_SIZE / 2.0;
     let y_min = TOP_BAR_HEIGHT + SEPARATOR_SIZE;
     let y_max = window_height - STATUS_BAR_HEIGHT - SEPARATOR_SIZE;
-    point.x >= x - HIT_MARGIN
-        && point.x <= x + HIT_MARGIN
-        && point.y >= y_min
-        && point.y <= y_max
+    point.x >= x - HIT_MARGIN && point.x <= x + HIT_MARGIN && point.y >= y_min && point.y <= y_max
 }
 
 fn is_over_right_sep(
@@ -281,8 +450,5 @@ fn is_over_right_sep(
     let x = window_width - right_width - SEPARATOR_SIZE / 2.0;
     let y_min = TOP_BAR_HEIGHT + SEPARATOR_SIZE;
     let y_max = window_height - STATUS_BAR_HEIGHT - SEPARATOR_SIZE;
-    point.x >= x - HIT_MARGIN
-        && point.x <= x + HIT_MARGIN
-        && point.y >= y_min
-        && point.y <= y_max
+    point.x >= x - HIT_MARGIN && point.x <= x + HIT_MARGIN && point.y >= y_min && point.y <= y_max
 }
