@@ -8,6 +8,7 @@ iced = { workspace = true }
 tokio = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
+uuid = { workspace = true }
 openspace-core = { path = "../openspace-core" }
 openspace-theme = { path = "../openspace-theme" }
 openspace-platform = { path = "../openspace-platform" }
