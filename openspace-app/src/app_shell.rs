@@ -5,11 +5,14 @@ use openspace_core::app_command::AppCommand;
 use openspace_core::session::{SessionDescriptor, SessionMode};
 use openspace_theme::theme::OpenSpaceTheme;
 use openspace_theme::tokens::*;
+use std::sync::Arc;
 
 use crate::app_router::AppRouter;
+use crate::audit::NoopAuditSink;
 use crate::center_surface::center_surface;
 use crate::command_palette::{CommandPaletteOverlay, CommandRegistry, PaletteMessage};
 use openspace_chat::ChatCommands;
+use openspace_core::audit::AuditSink;
 use openspace_core::command_palette::CommandDescriptorProvider;
 use openspace_editor::EditorCommands;
 use openspace_terminal::TerminalCommands;
@@ -25,7 +28,6 @@ const HIT_MARGIN: f32 = 3.0;
 /// 2 panel + center + 2 separator
 const MIN_WINDOW_WIDTH: f32 = MIN_PANEL_WIDTH * 2.0 + MIN_CENTER_WIDTH + 2.0 * SEPARATOR_SIZE;
 
-#[derive(Debug)]
 pub struct AppShell {
     /// Preferred width = user intent (from drag resize). Not clamped.
     preferred_left_width: f32,
@@ -41,6 +43,27 @@ pub struct AppShell {
     theme_mode: ThemeMode,
     command_registry: CommandRegistry,
     palette: CommandPaletteOverlay,
+    audit_sink: Arc<dyn AuditSink>,
+}
+
+impl std::fmt::Debug for AppShell {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AppShell")
+            .field("preferred_left_width", &self.preferred_left_width)
+            .field("preferred_right_width", &self.preferred_right_width)
+            .field("left_width", &self.left_width)
+            .field("right_width", &self.right_width)
+            .field("window_size", &self.window_size)
+            .field("mouse_position", &self.mouse_position)
+            .field("drag", &self.drag)
+            .field("router", &self.router)
+            .field("theme", &self.theme)
+            .field("theme_mode", &self.theme_mode)
+            .field("command_registry", &self.command_registry)
+            .field("palette", &self.palette)
+            .field("audit_sink", &"<dyn AuditSink>")
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -90,7 +113,16 @@ impl Default for AppShell {
             theme_mode: ThemeMode::Dark,
             command_registry: registry,
             palette: CommandPaletteOverlay::default(),
+            audit_sink: Arc::new(NoopAuditSink),
         }
+    }
+}
+
+impl AppShell {
+    /// Returns the currently wired audit sink. Features will call this
+    /// when they begin emitting audit records.
+    pub fn audit_sink(&self) -> &Arc<dyn AuditSink> {
+        &self.audit_sink
     }
 }
 

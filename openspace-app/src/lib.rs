@@ -1,5 +1,6 @@
 pub mod app_router;
 pub mod app_shell;
+pub mod audit;
 pub mod center_surface;
 pub mod command_palette;
 pub mod feature_runtime;

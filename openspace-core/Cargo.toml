@@ -3,7 +3,12 @@ name = "openspace-core"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+tracing = ["dep:tracing"]
+
 [dependencies]
 serde = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true, features = ["v4", "serde"] }
+tracing = { workspace = true, optional = true }
