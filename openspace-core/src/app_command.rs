@@ -17,7 +17,7 @@ pub enum FeatureCommand {
     Custom { payload: String },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum AppCommand {
     CreateSession {
         project_folder: PathBuf,

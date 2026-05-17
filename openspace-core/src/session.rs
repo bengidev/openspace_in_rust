@@ -1,17 +1,19 @@
 use std::path::PathBuf;
 use std::time::SystemTime;
+
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::permission::{PermissionDecision, PermissionProfile};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SessionMode {
     Terminal,
     Chat,
     Editor,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SessionDescriptor {
     pub name: String,
     pub created_at: SystemTime,
@@ -26,7 +28,7 @@ impl SessionDescriptor {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Session {
     pub id: Uuid,
     pub mode: SessionMode,
