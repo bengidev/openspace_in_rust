@@ -8,6 +8,11 @@ use openspace_theme::tokens::*;
 
 use crate::app_router::AppRouter;
 use crate::center_surface::center_surface;
+use crate::command_palette::{CommandPaletteOverlay, CommandRegistry, PaletteMessage};
+use openspace_chat::ChatCommands;
+use openspace_core::command_palette::CommandDescriptorProvider;
+use openspace_editor::EditorCommands;
+use openspace_terminal::TerminalCommands;
 
 const TOP_BAR_HEIGHT: f32 = 48.0;
 const STATUS_BAR_HEIGHT: f32 = 28.0;
@@ -34,6 +39,8 @@ pub struct AppShell {
     router: AppRouter,
     theme: OpenSpaceTheme,
     theme_mode: ThemeMode,
+    command_registry: CommandRegistry,
+    palette: CommandPaletteOverlay,
 }
 
 #[derive(Debug, Clone)]
@@ -47,11 +54,29 @@ pub enum Message {
     EventOccurred(Event),
     AppCommand(AppCommand),
     ToggleTheme,
+    Palette(PaletteMessage),
+}
+
+impl From<PaletteMessage> for Message {
+    fn from(msg: PaletteMessage) -> Self {
+        Message::Palette(msg)
+    }
 }
 
 impl Default for AppShell {
     fn default() -> Self {
         let preferred = 220.0;
+        let mut registry = CommandRegistry::new();
+        registry.merge(TerminalCommands::command_descriptors());
+        registry.merge(ChatCommands::command_descriptors());
+        registry.merge(EditorCommands::command_descriptors());
+        for (a, b) in registry.detect_conflicts() {
+            tracing::warn!(
+                "shortcut conflict: {:?} and {:?} share same shortcut in same context",
+                a,
+                b
+            );
+        }
         Self {
             preferred_left_width: preferred,
             preferred_right_width: preferred,
@@ -63,6 +88,8 @@ impl Default for AppShell {
             router: AppRouter::new(),
             theme: OpenSpaceTheme::dark(),
             theme_mode: ThemeMode::Dark,
+            command_registry: registry,
+            palette: CommandPaletteOverlay::default(),
         }
     }
 }
@@ -103,6 +130,12 @@ fn clamp_panel(preferred: f32, window_width: f32, other_panel: f32) -> f32 {
 
 fn update(state: &mut AppShell, message: Message) -> Task<Message> {
     match message {
+        Message::Palette(pmsg) => {
+            let all = state.command_registry.all();
+            let all_owned: Vec<_> = all.into_iter().cloned().collect();
+            state.palette.update(pmsg, &all_owned);
+            return Task::none();
+        }
         Message::ToggleTheme => {
             state.theme_mode = match state.theme_mode {
                 ThemeMode::Dark => ThemeMode::Light,
@@ -116,90 +149,98 @@ fn update(state: &mut AppShell, message: Message) -> Task<Message> {
                 tracing::debug!(?event, "app_event");
             }
         }
-        Message::EventOccurred(event) => match event {
-            Event::Window(iced::window::Event::Resized(size)) => {
-                // Guard: ignore transient invalid dimensions from macOS
-                // fullscreen transition. Sometimes winit sends 0x0 or a
-                // value too small before the final size.
-                if size.width < MIN_WINDOW_WIDTH
-                    || size.height
-                        < TOP_BAR_HEIGHT + STATUS_BAR_HEIGHT + SEPARATOR_SIZE * 2.0 + 10.0
-                {
-                    return Task::none();
-                }
-                state.window_size = size;
-                state.left_width = clamp_panel(
-                    state.preferred_left_width,
-                    state.window_size.width,
-                    state.right_width,
-                );
-                state.right_width = clamp_panel(
-                    state.preferred_right_width,
-                    state.window_size.width,
-                    state.left_width,
-                );
+        Message::EventOccurred(event) => {
+            if let Some(pmsg) = state.palette.handle_event(&event) {
+                let all = state.command_registry.all();
+                let all_owned: Vec<_> = all.into_iter().cloned().collect();
+                state.palette.update(pmsg, &all_owned);
+                return Task::none();
             }
-            Event::Mouse(mouse_event) => match mouse_event {
-                iced::mouse::Event::CursorMoved { position } => {
-                    state.mouse_position = Some(position);
-                    if let Some(drag) = &state.drag {
-                        match drag {
-                            DragState::Left {
-                                start_x,
-                                start_width,
-                            } => {
-                                let delta = position.x - start_x;
-                                let new_preferred = (start_width + delta).max(MIN_PANEL_WIDTH);
-                                state.preferred_left_width = new_preferred;
-                                state.left_width = clamp_panel(
-                                    state.preferred_left_width,
-                                    state.window_size.width,
-                                    state.right_width,
-                                );
-                            }
-                            DragState::Right {
-                                start_x,
-                                start_width,
-                            } => {
-                                let delta = position.x - start_x;
-                                let new_preferred = (start_width - delta).max(MIN_PANEL_WIDTH);
-                                state.preferred_right_width = new_preferred;
-                                state.right_width = clamp_panel(
-                                    state.preferred_right_width,
-                                    state.window_size.width,
-                                    state.left_width,
-                                );
+            match event {
+                Event::Window(iced::window::Event::Resized(size)) => {
+                    // Guard: ignore transient invalid dimensions from macOS
+                    // fullscreen transition. Sometimes winit sends 0x0 or a
+                    // value too small before the final size.
+                    if size.width < MIN_WINDOW_WIDTH
+                        || size.height
+                            < TOP_BAR_HEIGHT + STATUS_BAR_HEIGHT + SEPARATOR_SIZE * 2.0 + 10.0
+                    {
+                        return Task::none();
+                    }
+                    state.window_size = size;
+                    state.left_width = clamp_panel(
+                        state.preferred_left_width,
+                        state.window_size.width,
+                        state.right_width,
+                    );
+                    state.right_width = clamp_panel(
+                        state.preferred_right_width,
+                        state.window_size.width,
+                        state.left_width,
+                    );
+                }
+                Event::Mouse(mouse_event) => match mouse_event {
+                    iced::mouse::Event::CursorMoved { position } => {
+                        state.mouse_position = Some(position);
+                        if let Some(drag) = &state.drag {
+                            match drag {
+                                DragState::Left {
+                                    start_x,
+                                    start_width,
+                                } => {
+                                    let delta = position.x - start_x;
+                                    let new_preferred = (start_width + delta).max(MIN_PANEL_WIDTH);
+                                    state.preferred_left_width = new_preferred;
+                                    state.left_width = clamp_panel(
+                                        state.preferred_left_width,
+                                        state.window_size.width,
+                                        state.right_width,
+                                    );
+                                }
+                                DragState::Right {
+                                    start_x,
+                                    start_width,
+                                } => {
+                                    let delta = position.x - start_x;
+                                    let new_preferred = (start_width - delta).max(MIN_PANEL_WIDTH);
+                                    state.preferred_right_width = new_preferred;
+                                    state.right_width = clamp_panel(
+                                        state.preferred_right_width,
+                                        state.window_size.width,
+                                        state.left_width,
+                                    );
+                                }
                             }
                         }
                     }
-                }
-                iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left) => {
-                    if let Some(pos) = state.mouse_position {
-                        if is_over_left_sep(pos, state.left_width, state.window_size.height) {
-                            state.drag = Some(DragState::Left {
-                                start_x: pos.x,
-                                start_width: state.left_width,
-                            });
-                        } else if is_over_right_sep(
-                            pos,
-                            state.window_size.width,
-                            state.right_width,
-                            state.window_size.height,
-                        ) {
-                            state.drag = Some(DragState::Right {
-                                start_x: pos.x,
-                                start_width: state.right_width,
-                            });
+                    iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left) => {
+                        if let Some(pos) = state.mouse_position {
+                            if is_over_left_sep(pos, state.left_width, state.window_size.height) {
+                                state.drag = Some(DragState::Left {
+                                    start_x: pos.x,
+                                    start_width: state.left_width,
+                                });
+                            } else if is_over_right_sep(
+                                pos,
+                                state.window_size.width,
+                                state.right_width,
+                                state.window_size.height,
+                            ) {
+                                state.drag = Some(DragState::Right {
+                                    start_x: pos.x,
+                                    start_width: state.right_width,
+                                });
+                            }
                         }
                     }
-                }
-                iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left) => {
-                    state.drag = None;
-                }
+                    iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left) => {
+                        state.drag = None;
+                    }
+                    _ => {}
+                },
                 _ => {}
-            },
-            _ => {}
-        },
+            }
+        }
     }
     Task::none()
 }
@@ -269,15 +310,21 @@ fn view(state: &AppShell) -> Element<'_, Message> {
         .height(Length::Fill)
         .width(Length::Fill);
 
-    Column::new()
+    let main_ui = Column::new()
         .push(top_bar)
         .push(horizontal_separator(theme))
         .push(middle)
         .push(horizontal_separator(theme))
         .push(status_bar)
         .height(Length::Fill)
-        .width(Length::Fill)
-        .into()
+        .width(Length::Fill);
+
+    if state.palette.visible {
+        let overlay: Element<'_, Message> = state.palette.view(theme);
+        iced::widget::stack![main_ui, overlay].into()
+    } else {
+        main_ui.into()
+    }
 }
 
 fn top_bar_view<'a>(state: &'a AppShell) -> Element<'a, Message> {
