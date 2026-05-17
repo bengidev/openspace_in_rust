@@ -3546,7 +3546,9 @@ name = "openspace-secrets"
 version = "0.1.0"
 dependencies = [
  "keyring",
+ "keyring-core",
  "serde",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
