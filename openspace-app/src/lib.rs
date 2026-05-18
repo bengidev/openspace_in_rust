@@ -5,5 +5,6 @@ pub mod center_surface;
 pub mod command_palette;
 pub mod feature_runtime;
 pub mod mock_features;
+pub mod onboarding_app;
 pub mod onboarding_home;
 pub mod onboarding_welcome;
