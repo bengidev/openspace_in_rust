@@ -124,6 +124,24 @@ impl AppShell {
     pub fn audit_sink(&self) -> &Arc<dyn AuditSink> {
         &self.audit_sink
     }
+
+    /// Constructs an [`AppShell`] that opens with the given theme
+    /// mode. Used by the onboarding router so a theme toggle inside
+    /// the welcome window carries through to the home shell on
+    /// transition.
+    pub fn with_theme_mode(mode: ThemeMode) -> Self {
+        Self {
+            theme: OpenSpaceTheme::from_mode(mode),
+            theme_mode: mode,
+            ..Self::default()
+        }
+    }
+
+    /// Returns the active theme mode. Used by the router so the
+    /// welcome stage can keep in sync when home toggles the theme.
+    pub fn theme_mode(&self) -> ThemeMode {
+        self.theme_mode
+    }
 }
 
 pub fn run() -> iced::Result {
@@ -154,10 +172,29 @@ fn subscription(_state: &AppShell) -> Subscription<Message> {
     iced::event::listen().map(Message::EventOccurred)
 }
 
+/// Public adapter for the routing layer.
+///
+/// Exposes the same subscription used by [`run`] so the
+/// onboarding router can splice it into its own subscription tree
+/// while the welcome window is dismissed and home is mounted.
+pub fn shell_subscription(state: &AppShell) -> Subscription<Message> {
+    subscription(state)
+}
+
 /// Clamp panel width to the available space from the current window width.
 fn clamp_panel(preferred: f32, window_width: f32, other_panel: f32) -> f32 {
     let max = window_width - other_panel - MIN_CENTER_WIDTH - 2.0 * SEPARATOR_SIZE;
     preferred.clamp(MIN_PANEL_WIDTH, max.max(MIN_PANEL_WIDTH))
+}
+
+/// Public adapter exposing the shell's update function.
+pub fn shell_update(state: &mut AppShell, message: Message) -> Task<Message> {
+    update(state, message)
+}
+
+/// Public adapter exposing the shell's view function.
+pub fn shell_view(state: &AppShell) -> Element<'_, Message> {
+    view(state)
 }
 
 fn update(state: &mut AppShell, message: Message) -> Task<Message> {
