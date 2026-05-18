@@ -1,5 +1,5 @@
-use openspace_app::app_shell;
+use openspace_app::onboarding_app;
 
 fn main() -> iced::Result {
-    app_shell::run()
+    onboarding_app::run()
 }
