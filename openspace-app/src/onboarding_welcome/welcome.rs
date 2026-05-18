@@ -292,20 +292,12 @@ fn hero_block(state: &WelcomeState) -> Element<'_, WelcomeMessage> {
         .width(Length::Fill)
         .height(Length::Fixed(220.0));
 
+    // The orb sits directly on the page background — no card, no
+    // border — so the particle field bleeds into the surrounding
+    // chrome the way the reference recording does.
     let orb_card = container(orb)
         .width(Length::Fill)
-        .height(Length::Fixed(220.0))
-        .style(move |_t: &Theme| container::Style {
-            background: Some(iced::Background::Color(
-                theme.background(BackgroundToken::Secondary),
-            )),
-            border: iced::Border {
-                radius: 6.0.into(),
-                width: 1.0,
-                color: theme.border(BorderToken::Default),
-            },
-            ..Default::default()
-        });
+        .height(Length::Fixed(220.0));
 
     let badge = container(
         row![
