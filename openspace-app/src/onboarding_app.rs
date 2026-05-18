@@ -39,9 +39,7 @@ use openspace_theme::tokens::{BackgroundToken, ForegroundToken, ThemeMode};
 
 use crate::app_shell;
 use crate::onboarding_home;
-use crate::onboarding_welcome::persistence::{
-    FileWelcomePersistence, WelcomePersistence,
-};
+use crate::onboarding_welcome::persistence::{FileWelcomePersistence, WelcomePersistence};
 use crate::onboarding_welcome::welcome::{
     self as welcome_view, WelcomeMessage, WelcomeOutcome, WelcomeState,
 };
@@ -54,16 +52,16 @@ use crate::onboarding_welcome::welcome::{
 /// 4:3 footprint so the welcome window feels like a small dialog
 /// rather than a workspace.
 pub const WELCOME_DEFAULT_SIZE: Size = Size {
-    width: 800.0,
-    height: 600.0,
+    width: 1000.0,
+    height: 800.0,
 };
 
 /// Minimum window size while the welcome stage is active. Same as
 /// the default — the welcome layout is fixed and we do not let the
 /// user shrink it further.
 pub const WELCOME_MIN_SIZE: Size = Size {
-    width: 800.0,
-    height: 600.0,
+    width: 1000.0,
+    height: 800.0,
 };
 
 /// Default window size for the home stage. Mirrors the original
@@ -76,8 +74,8 @@ pub const HOME_DEFAULT_SIZE: Size = Size {
 /// Minimum window size while the home stage is active. Tracks the
 /// constants in `app_shell` (panels + center + bars).
 pub const HOME_MIN_SIZE: Size = Size {
-    width: 900.0,
-    height: 560.0,
+    width: 1280.0,
+    height: 800.0,
 };
 
 // ---------------------------------------------------------------------------
@@ -97,6 +95,16 @@ pub enum Message {
     Welcome(WelcomeMessage),
     /// Message destined for the home stage.
     Home(app_shell::Message),
+    /// Debug-only: clear the welcome flag and bounce back to the
+    /// welcome stage. Used by the dev overlay.
+    #[cfg(debug_assertions)]
+    DevResetToWelcome,
+    /// Debug-only: window resize event used to populate the size
+    /// indicator. Carried in its own variant rather than reusing
+    /// `app_shell::Message::EventOccurred` so the indicator stays
+    /// live even when the welcome stage is active.
+    #[cfg(debug_assertions)]
+    DevWindowResized(iced::Size),
 }
 
 impl From<WelcomeMessage> for Message {
@@ -142,15 +150,20 @@ pub struct OnboardingApp {
     /// this to drive `iced::window::resize` / `set_min_size` when
     /// the welcome stage finishes and we transition to home.
     pub window_id: Option<iced::window::Id>,
+    /// Latest known window size. Maintained from the resize event
+    /// stream and surfaced in the debug overlay.
+    #[cfg(debug_assertions)]
+    pub window_size: iced::Size,
 }
 
 impl std::fmt::Debug for OnboardingApp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("OnboardingApp")
-            .field("stage", &self.stage)
-            .field("window_id", &self.window_id)
-            .field("persistence", &"<dyn WelcomePersistence>")
-            .finish()
+        let mut s = f.debug_struct("OnboardingApp");
+        s.field("stage", &self.stage)
+            .field("window_id", &self.window_id);
+        #[cfg(debug_assertions)]
+        s.field("window_size", &self.window_size);
+        s.field("persistence", &"<dyn WelcomePersistence>").finish()
     }
 }
 
@@ -172,6 +185,8 @@ impl OnboardingApp {
             stage,
             persistence,
             window_id: None,
+            #[cfg(debug_assertions)]
+            window_size: WELCOME_DEFAULT_SIZE,
         }
     }
 
@@ -238,7 +253,33 @@ pub fn update(state: &mut OnboardingApp, message: Message) -> Task<Message> {
                 Task::none()
             }
         }
+        #[cfg(debug_assertions)]
+        Message::DevResetToWelcome => handle_dev_reset(state),
+        #[cfg(debug_assertions)]
+        Message::DevWindowResized(size) => {
+            state.window_size = size;
+            Task::none()
+        }
     }
+}
+
+/// Debug-only handler for the "back to welcome" action. Clears the
+/// persistence flag, swaps the stage back to Welcome, and re-applies
+/// the welcome-stage window constraints.
+#[cfg(debug_assertions)]
+fn handle_dev_reset(state: &mut OnboardingApp) -> Task<Message> {
+    if let Err(e) = state.persistence.reset() {
+        tracing::warn!(?e, "dev: failed to reset welcome flag");
+    }
+    let theme_mode = match &state.stage {
+        Stage::Welcome(w) => w.theme_mode,
+        Stage::Home(s) => s.theme_mode(),
+    };
+    state.stage = Stage::Welcome(Box::new(WelcomeState::new(
+        Arc::clone(&state.persistence),
+        theme_mode,
+    )));
+    apply_stage_window_constraints(state)
 }
 
 /// Applies the window sizing rules for the active stage.
@@ -269,10 +310,7 @@ fn apply_stage_window_constraints(state: &OnboardingApp) -> Task<Message> {
 }
 
 /// Handles the [`WelcomeOutcome`] reported by the welcome stage.
-fn handle_welcome_outcome(
-    state: &mut OnboardingApp,
-    outcome: WelcomeOutcome,
-) -> Task<Message> {
+fn handle_welcome_outcome(state: &mut OnboardingApp, outcome: WelcomeOutcome) -> Task<Message> {
     match outcome {
         WelcomeOutcome::None | WelcomeOutcome::ThemeToggled(_) => Task::none(),
         WelcomeOutcome::Completed | WelcomeOutcome::Skipped => {
@@ -289,8 +327,7 @@ fn handle_welcome_outcome(
                 tracing::warn!(?e, "failed to persist welcome completion flag");
             }
 
-            state.stage =
-                Stage::Home(Box::new(onboarding_home::new(theme_mode)));
+            state.stage = Stage::Home(Box::new(onboarding_home::new(theme_mode)));
 
             // Relax window sizing back to the home workspace
             // defaults so the user can actually use the app.
@@ -301,28 +338,224 @@ fn handle_welcome_outcome(
 
 /// Top-level view dispatcher.
 pub fn view(state: &OnboardingApp) -> iced::Element<'_, Message> {
-    match &state.stage {
+    let stage_element: iced::Element<'_, Message> = match &state.stage {
         Stage::Welcome(welcome) => welcome_view::view(welcome).map(Message::Welcome),
         Stage::Home(shell) => app_shell::shell_view(shell).map(Message::Home),
+    };
+
+    #[cfg(debug_assertions)]
+    {
+        let overlay = dev_overlay::view(state);
+        return iced::widget::stack![stage_element, overlay].into();
     }
+    #[cfg(not(debug_assertions))]
+    stage_element
 }
 
 /// Top-level subscription dispatcher. Each stage owns its own
 /// subscription set.
 pub fn subscription(state: &OnboardingApp) -> Subscription<Message> {
-    match &state.stage {
+    let stage_sub = match &state.stage {
         Stage::Welcome(welcome) => welcome.subscription().map(Message::Welcome),
-        Stage::Home(shell) => {
-            app_shell::shell_subscription(shell).map(Message::Home)
+        Stage::Home(shell) => app_shell::shell_subscription(shell).map(Message::Home),
+    };
+
+    #[cfg(debug_assertions)]
+    {
+        // Track window resizes so the dev overlay can show live
+        // dimensions regardless of which stage is active.
+        let resizes =
+            iced::window::resize_events().map(|(_, size)| Message::DevWindowResized(size));
+        return Subscription::batch([stage_sub, resizes]);
+    }
+    #[cfg(not(debug_assertions))]
+    stage_sub
+}
+
+// ---------------------------------------------------------------------------
+// Debug-only dev overlay
+// ---------------------------------------------------------------------------
+
+/// Floating overlay rendered in debug builds only.
+///
+/// Provides two affordances:
+/// * a live indicator of the current window size, useful when
+///   tweaking the welcome layout against the reference screenshots;
+/// * a "back to welcome" button that clears the welcome flag and
+///   bounces the stage back to Welcome without restarting the
+///   process.
+///
+/// The overlay is positioned in the bottom-right of the window,
+/// inside a translucent chip that hugs the terminal aesthetic.
+#[cfg(debug_assertions)]
+mod dev_overlay {
+    use iced::Length;
+    use iced::Theme;
+    use iced::alignment::{Horizontal, Vertical};
+    use iced::widget::{button, container, row, text};
+
+    use openspace_theme::theme::OpenSpaceTheme;
+    use openspace_theme::tokens::{BackgroundToken, BorderToken, ForegroundToken, StatusToken};
+
+    use super::{Message, OnboardingApp, Stage};
+
+    pub fn view(state: &OnboardingApp) -> iced::Element<'_, Message> {
+        let theme = state.theme();
+        let size = state.window_size;
+
+        let stage_label = match state.stage {
+            Stage::Welcome(_) => "WELCOME",
+            Stage::Home(_) => "HOME",
+        };
+
+        // Size + stage indicator chip.
+        let indicator = container(
+            row![
+                pip(theme.status(StatusToken::Warning), 6.0),
+                spacer(8.0, true),
+                text(format!(
+                    "DEV \u{2022} {stage} \u{2022} {w}\u{00D7}{h}",
+                    stage = stage_label,
+                    w = size.width.round() as i32,
+                    h = size.height.round() as i32,
+                ))
+                .size(10)
+                .style(move |_t: &Theme| text::Style {
+                    color: Some(theme.foreground(ForegroundToken::Secondary)),
+                }),
+            ]
+            .align_y(Vertical::Center),
+        )
+        .padding([6, 10])
+        .style(move |_t: &Theme| container::Style {
+            background: Some(iced::Background::Color(with_alpha(
+                theme.background(BackgroundToken::Tertiary),
+                0.92,
+            ))),
+            border: iced::Border {
+                radius: 4.0.into(),
+                width: 1.0,
+                color: theme.border(BorderToken::Default),
+            },
+            ..Default::default()
+        });
+
+        // "Back to welcome" button — only meaningful while in the
+        // home stage. We still render it in welcome (greyed out)
+        // so the overlay layout does not jump.
+        let in_welcome = matches!(state.stage, Stage::Welcome(_));
+        let label = if in_welcome {
+            "ON WELCOME"
+        } else {
+            "BACK TO WELCOME"
+        };
+
+        let mut back_button = button(text(label).size(10).style(move |_t: &Theme| text::Style {
+            color: Some(if in_welcome {
+                theme.foreground(ForegroundToken::Muted)
+            } else {
+                theme.foreground(ForegroundToken::Accent)
+            }),
+        }))
+        .padding([6, 10])
+        .style(move |_t: &Theme, status| dev_button_style(theme, status, in_welcome));
+
+        if !in_welcome {
+            back_button = back_button.on_press(Message::DevResetToWelcome);
+        }
+
+        let chip_row = row![indicator, spacer(8.0, true), back_button].align_y(Vertical::Center);
+
+        // Position the chip in the bottom-right corner without
+        // intercepting clicks elsewhere on the page.
+        container(chip_row)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .padding(12)
+            .align_x(Horizontal::Right)
+            .align_y(Vertical::Bottom)
+            .into()
+    }
+
+    fn dev_button_style(
+        theme: OpenSpaceTheme,
+        status: button::Status,
+        disabled: bool,
+    ) -> button::Style {
+        let base = button::Style {
+            background: Some(iced::Background::Color(with_alpha(
+                theme.background(BackgroundToken::Tertiary),
+                0.92,
+            ))),
+            text_color: theme.foreground(ForegroundToken::Accent),
+            border: iced::Border {
+                radius: 4.0.into(),
+                width: 1.0,
+                color: theme.border(BorderToken::Default),
+            },
+            ..Default::default()
+        };
+        if disabled {
+            return base;
+        }
+        match status {
+            button::Status::Hovered => button::Style {
+                background: Some(iced::Background::Color(
+                    theme.background(BackgroundToken::Elevated),
+                )),
+                border: iced::Border {
+                    radius: 4.0.into(),
+                    width: 1.0,
+                    color: theme.border(BorderToken::Strong),
+                },
+                ..base
+            },
+            button::Status::Pressed => button::Style {
+                background: Some(iced::Background::Color(
+                    theme.background(BackgroundToken::Secondary),
+                )),
+                ..base
+            },
+            _ => base,
+        }
+    }
+
+    fn pip(color: iced::Color, diameter: f32) -> iced::Element<'static, Message> {
+        container(iced::widget::Space::new())
+            .width(Length::Fixed(diameter))
+            .height(Length::Fixed(diameter))
+            .style(move |_t: &Theme| container::Style {
+                background: Some(iced::Background::Color(color)),
+                border: iced::Border {
+                    radius: (diameter * 0.5).into(),
+                    width: 0.0,
+                    color: iced::Color::TRANSPARENT,
+                },
+                ..Default::default()
+            })
+            .into()
+    }
+
+    fn spacer(size: f32, horizontal: bool) -> iced::Element<'static, Message> {
+        let s = iced::widget::Space::new();
+        if horizontal {
+            s.width(Length::Fixed(size)).into()
+        } else {
+            s.height(Length::Fixed(size)).into()
+        }
+    }
+
+    fn with_alpha(color: iced::Color, alpha: f32) -> iced::Color {
+        iced::Color {
+            a: alpha.clamp(0.0, 1.0),
+            ..color
         }
     }
 }
 
 // ---------------------------------------------------------------------------
 // Iced entry point
-// ---------------------------------------------------------------------------
-
-/// Boot the desktop application using the production
+// ---------------------------------------------------------------------------/// Boot the desktop application using the production
 /// (filesystem-backed) persistence.
 pub fn run() -> iced::Result {
     let persistence: Arc<dyn WelcomePersistence> = Arc::new(
@@ -343,9 +576,7 @@ pub fn run() -> iced::Result {
 
 /// Boot the application with an injected persistence backend. Used
 /// by integration tests to swap in the in-memory implementation.
-pub fn run_with(
-    persistence: Arc<dyn WelcomePersistence>,
-) -> iced::Result {
+pub fn run_with(persistence: Arc<dyn WelcomePersistence>) -> iced::Result {
     // Start at the welcome size by default. If we boot straight
     // into the home stage (returning user) the `Booted` task will
     // resize up immediately.
@@ -394,22 +625,16 @@ mod tests {
 
     #[test]
     fn returning_user_starts_in_home_stage() {
-        let app = new_router(Arc::new(
-            InMemoryWelcomePersistence::already_completed(),
-        ));
+        let app = new_router(Arc::new(InMemoryWelcomePersistence::already_completed()));
         assert!(matches!(app.stage, Stage::Home(_)));
     }
 
     #[test]
     fn enter_pressed_marks_persistence_and_transitions_to_home() {
-        let store: Arc<dyn WelcomePersistence> =
-            Arc::new(InMemoryWelcomePersistence::new());
+        let store: Arc<dyn WelcomePersistence> = Arc::new(InMemoryWelcomePersistence::new());
         let mut app = new_router(Arc::clone(&store));
 
-        let _ = update(
-            &mut app,
-            Message::Welcome(WelcomeMessage::EnterPressed),
-        );
+        let _ = update(&mut app, Message::Welcome(WelcomeMessage::EnterPressed));
 
         assert!(matches!(app.stage, Stage::Home(_)));
         assert!(store.is_completed(), "welcome flag must be persisted");
@@ -417,8 +642,7 @@ mod tests {
 
     #[test]
     fn skip_marks_persistence_and_transitions_to_home() {
-        let store: Arc<dyn WelcomePersistence> =
-            Arc::new(InMemoryWelcomePersistence::new());
+        let store: Arc<dyn WelcomePersistence> = Arc::new(InMemoryWelcomePersistence::new());
         let mut app = new_router(Arc::clone(&store));
 
         let _ = update(&mut app, Message::Welcome(WelcomeMessage::Skipped));
@@ -429,22 +653,15 @@ mod tests {
 
     #[test]
     fn theme_toggle_in_welcome_persists_into_home_after_transition() {
-        let store: Arc<dyn WelcomePersistence> =
-            Arc::new(InMemoryWelcomePersistence::new());
+        let store: Arc<dyn WelcomePersistence> = Arc::new(InMemoryWelcomePersistence::new());
         let mut app = new_router(Arc::clone(&store));
 
         // dark by default; toggle to light
-        let _ = update(
-            &mut app,
-            Message::Welcome(WelcomeMessage::ToggleTheme),
-        );
+        let _ = update(&mut app, Message::Welcome(WelcomeMessage::ToggleTheme));
         assert_eq!(app.theme_mode(), ThemeMode::Light);
 
         // accept welcome -> home should keep light mode
-        let _ = update(
-            &mut app,
-            Message::Welcome(WelcomeMessage::EnterPressed),
-        );
+        let _ = update(&mut app, Message::Welcome(WelcomeMessage::EnterPressed));
         assert!(matches!(app.stage, Stage::Home(_)));
         assert_eq!(app.theme_mode(), ThemeMode::Light);
     }
@@ -457,10 +674,7 @@ mod tests {
         // Sanity: we should be in home and dispatching a Home message
         // should not panic. We use the Home::ToggleTheme path because
         // it is purely local.
-        let _ = update(
-            &mut app,
-            Message::Home(app_shell::Message::ToggleTheme),
-        );
+        let _ = update(&mut app, Message::Home(app_shell::Message::ToggleTheme));
     }
 
     #[test]
@@ -474,11 +688,35 @@ mod tests {
         assert!(matches!(app.stage, Stage::Home(_)));
 
         let now = std::time::Instant::now();
-        let _ = update(
-            &mut app,
-            Message::Welcome(WelcomeMessage::Tick(now)),
-        );
+        let _ = update(&mut app, Message::Welcome(WelcomeMessage::Tick(now)));
         // No panic and stage unchanged.
         assert!(matches!(app.stage, Stage::Home(_)));
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn dev_reset_clears_persistence_and_returns_to_welcome() {
+        let store: Arc<dyn WelcomePersistence> =
+            Arc::new(InMemoryWelcomePersistence::already_completed());
+        let mut app = new_router(Arc::clone(&store));
+        assert!(matches!(app.stage, Stage::Home(_)));
+
+        let _ = update(&mut app, Message::DevResetToWelcome);
+
+        assert!(matches!(app.stage, Stage::Welcome(_)));
+        assert!(
+            !store.is_completed(),
+            "dev reset must clear the welcome flag"
+        );
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn dev_window_resized_updates_tracked_size() {
+        let store: Arc<dyn WelcomePersistence> = Arc::new(InMemoryWelcomePersistence::new());
+        let mut app = new_router(store);
+        let new_size = iced::Size::new(1234.0, 567.0);
+        let _ = update(&mut app, Message::DevWindowResized(new_size));
+        assert_eq!(app.window_size, new_size);
     }
 }
