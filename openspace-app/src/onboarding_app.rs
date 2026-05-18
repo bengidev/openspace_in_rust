@@ -30,6 +30,7 @@
 
 use std::sync::Arc;
 
+use iced::Size;
 use iced::Subscription;
 use iced::Task;
 
@@ -46,6 +47,40 @@ use crate::onboarding_welcome::welcome::{
 };
 
 // ---------------------------------------------------------------------------
+// Window sizing
+// ---------------------------------------------------------------------------
+
+/// Default window size for the welcome stage. Sized to a compact
+/// 4:3 footprint so the welcome window feels like a small dialog
+/// rather than a workspace.
+pub const WELCOME_DEFAULT_SIZE: Size = Size {
+    width: 800.0,
+    height: 600.0,
+};
+
+/// Minimum window size while the welcome stage is active. Same as
+/// the default — the welcome layout is fixed and we do not let the
+/// user shrink it further.
+pub const WELCOME_MIN_SIZE: Size = Size {
+    width: 800.0,
+    height: 600.0,
+};
+
+/// Default window size for the home stage. Mirrors the original
+/// pre-onboarding default.
+pub const HOME_DEFAULT_SIZE: Size = Size {
+    width: 1280.0,
+    height: 800.0,
+};
+
+/// Minimum window size while the home stage is active. Tracks the
+/// constants in `app_shell` (panels + center + bars).
+pub const HOME_MIN_SIZE: Size = Size {
+    width: 900.0,
+    height: 560.0,
+};
+
+// ---------------------------------------------------------------------------
 // Messages + state
 // ---------------------------------------------------------------------------
 
@@ -54,6 +89,10 @@ use crate::onboarding_welcome::welcome::{
 /// without ambiguity.
 #[derive(Debug, Clone)]
 pub enum Message {
+    /// Window id resolved at startup. We hold onto it so the router
+    /// can drive `iced::window::resize` / `set_min_size` /
+    /// `set_max_size` when the welcome stage transitions to home.
+    Booted(Option<iced::window::Id>),
     /// Message destined for the welcome stage.
     Welcome(WelcomeMessage),
     /// Message destined for the home stage.
@@ -99,12 +138,17 @@ impl std::fmt::Debug for Stage {
 pub struct OnboardingApp {
     pub stage: Stage,
     pub persistence: Arc<dyn WelcomePersistence>,
+    /// Latest known window id, captured at startup. The router uses
+    /// this to drive `iced::window::resize` / `set_min_size` when
+    /// the welcome stage finishes and we transition to home.
+    pub window_id: Option<iced::window::Id>,
 }
 
 impl std::fmt::Debug for OnboardingApp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("OnboardingApp")
             .field("stage", &self.stage)
+            .field("window_id", &self.window_id)
             .field("persistence", &"<dyn WelcomePersistence>")
             .finish()
     }
@@ -124,7 +168,23 @@ impl OnboardingApp {
                 ThemeMode::Dark,
             )))
         };
-        Self { stage, persistence }
+        Self {
+            stage,
+            persistence,
+            window_id: None,
+        }
+    }
+
+    /// Initialiser used by `iced::application`. Returns the same
+    /// state as [`Self::new`] paired with a startup task that
+    /// resolves the window id and applies stage-appropriate sizing
+    /// constraints.
+    pub fn init(persistence: Arc<dyn WelcomePersistence>) -> (Self, Task<Message>) {
+        let state = Self::new(persistence);
+        // Fetch the window id; the message handler then applies the
+        // initial min-size for whichever stage we booted into.
+        let task = iced::window::latest().map(Message::Booted);
+        (state, task)
     }
 
     /// Returns the active theme mode regardless of stage so the
@@ -152,19 +212,59 @@ impl OnboardingApp {
 /// transitions reported by the sub-stage. Persistence side-effects
 /// happen here.
 pub fn update(state: &mut OnboardingApp, message: Message) -> Task<Message> {
-    match (&mut state.stage, message) {
-        (Stage::Welcome(welcome), Message::Welcome(msg)) => {
-            let outcome = welcome.update(msg);
-            handle_welcome_outcome(state, outcome)
+    match message {
+        Message::Booted(id) => {
+            state.window_id = id;
+            // Apply stage-appropriate sizing on first boot. The
+            // welcome stage runs at a compact default; the home
+            // stage uses the larger workspace default.
+            apply_stage_window_constraints(state)
         }
-        (Stage::Home(shell), Message::Home(msg)) => {
-            let task = app_shell::shell_update(shell, msg);
-            task.map(Message::Home)
+        Message::Welcome(msg) => {
+            if let Stage::Welcome(welcome) = &mut state.stage {
+                let outcome = welcome.update(msg);
+                handle_welcome_outcome(state, outcome)
+            } else {
+                // Stale tick from `iced::time::every` after the
+                // stage transitioned. Drop it.
+                Task::none()
+            }
         }
-        // Drop messages destined for an inactive stage. This can
-        // happen briefly during a transition while in-flight ticks
-        // from `iced::time::every` are still being delivered.
-        _ => Task::none(),
+        Message::Home(msg) => {
+            if let Stage::Home(shell) = &mut state.stage {
+                let task = app_shell::shell_update(shell, msg);
+                task.map(Message::Home)
+            } else {
+                Task::none()
+            }
+        }
+    }
+}
+
+/// Applies the window sizing rules for the active stage.
+///
+/// On the welcome stage we clamp the window to a compact pair of
+/// dimensions so the layout never grows wider than the four-cell
+/// feature row. On the home stage we relax the constraints back to
+/// the workspace defaults.
+fn apply_stage_window_constraints(state: &OnboardingApp) -> Task<Message> {
+    let Some(id) = state.window_id else {
+        return Task::none();
+    };
+
+    match &state.stage {
+        Stage::Welcome(_) => Task::batch([
+            iced::window::resize::<Message>(id, WELCOME_DEFAULT_SIZE),
+            iced::window::set_min_size::<Message>(id, Some(WELCOME_MIN_SIZE)),
+            // Cap the welcome window so the layout cannot grow past
+            // the compact reference. Cleared again on transition.
+            iced::window::set_max_size::<Message>(id, Some(WELCOME_DEFAULT_SIZE)),
+        ]),
+        Stage::Home(_) => Task::batch([
+            iced::window::set_max_size::<Message>(id, None),
+            iced::window::set_min_size::<Message>(id, Some(HOME_MIN_SIZE)),
+            iced::window::resize::<Message>(id, HOME_DEFAULT_SIZE),
+        ]),
     }
 }
 
@@ -191,7 +291,10 @@ fn handle_welcome_outcome(
 
             state.stage =
                 Stage::Home(Box::new(onboarding_home::new(theme_mode)));
-            Task::none()
+
+            // Relax window sizing back to the home workspace
+            // defaults so the user can actually use the app.
+            apply_stage_window_constraints(state)
         }
     }
 }
@@ -243,16 +346,19 @@ pub fn run() -> iced::Result {
 pub fn run_with(
     persistence: Arc<dyn WelcomePersistence>,
 ) -> iced::Result {
+    // Start at the welcome size by default. If we boot straight
+    // into the home stage (returning user) the `Booted` task will
+    // resize up immediately.
     let window = iced::window::Settings {
-        size: iced::Size::new(1280.0, 800.0),
+        size: WELCOME_DEFAULT_SIZE,
         position: iced::window::Position::Centered,
-        min_size: Some(iced::Size::new(900.0, 560.0)),
+        min_size: Some(WELCOME_MIN_SIZE),
         transparent: true,
         ..iced::window::Settings::default()
     };
 
     iced::application(
-        move || OnboardingApp::new(Arc::clone(&persistence)),
+        move || OnboardingApp::init(Arc::clone(&persistence)),
         update,
         view,
     )
