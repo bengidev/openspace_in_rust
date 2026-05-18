@@ -9,6 +9,8 @@ tokio = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
+directories = { workspace = true }
+thiserror = { workspace = true }
 openspace-core = { path = "../openspace-core" }
 openspace-theme = { path = "../openspace-theme" }
 openspace-platform = { path = "../openspace-platform" }
@@ -24,6 +26,7 @@ openspace-git = { path = "../openspace-git" }
 
 [dev-dependencies]
 toml = "0.8"
+tempfile = "3"
 
 [[bin]]
 name = "openspace"
