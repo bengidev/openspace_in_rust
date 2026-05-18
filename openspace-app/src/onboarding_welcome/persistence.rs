@@ -39,6 +39,15 @@ pub trait WelcomePersistence: Send + Sync {
 
     /// Marks the welcome window as completed. Idempotent.
     fn mark_completed(&self) -> Result<(), WelcomePersistenceError>;
+
+    /// Clears the completion flag so the welcome window appears on
+    /// the next launch. Used by debug builds to ship a "back to
+    /// welcome" affordance; not exposed in release builds. Default
+    /// implementation is a no-op so out-of-tree implementations do
+    /// not break.
+    fn reset(&self) -> Result<(), WelcomePersistenceError> {
+        Ok(())
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -102,6 +111,15 @@ impl WelcomePersistence for FileWelcomePersistence {
             .open(&self.sentinel_path)?;
         Ok(())
     }
+
+    fn reset(&self) -> Result<(), WelcomePersistenceError> {
+        match fs::remove_file(&self.sentinel_path) {
+            Ok(()) => Ok(()),
+            // Already absent — nothing to clear.
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(WelcomePersistenceError::Io(e)),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -133,6 +151,11 @@ impl WelcomePersistence for InMemoryWelcomePersistence {
 
     fn mark_completed(&self) -> Result<(), WelcomePersistenceError> {
         *self.completed.lock().unwrap() = true;
+        Ok(())
+    }
+
+    fn reset(&self) -> Result<(), WelcomePersistenceError> {
+        *self.completed.lock().unwrap() = false;
         Ok(())
     }
 }
@@ -192,5 +215,31 @@ mod tests {
     fn in_memory_already_completed_starts_true() {
         let store = InMemoryWelcomePersistence::already_completed();
         assert!(store.is_completed());
+    }
+
+    #[test]
+    fn in_memory_reset_clears_completion() {
+        let store = InMemoryWelcomePersistence::already_completed();
+        store.reset().unwrap();
+        assert!(!store.is_completed());
+    }
+
+    #[test]
+    fn file_reset_removes_sentinel() {
+        let tmp = TempDir::new().unwrap();
+        let store = FileWelcomePersistence::new_at(tmp.path());
+        store.mark_completed().unwrap();
+        assert!(store.is_completed());
+        store.reset().unwrap();
+        assert!(!store.is_completed());
+    }
+
+    #[test]
+    fn file_reset_when_absent_is_idempotent() {
+        let tmp = TempDir::new().unwrap();
+        let store = FileWelcomePersistence::new_at(tmp.path());
+        // No mark_completed beforehand; reset should still succeed.
+        store.reset().unwrap();
+        assert!(!store.is_completed());
     }
 }
