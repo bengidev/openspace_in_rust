@@ -163,7 +163,7 @@ pub fn view(state: &WelcomeState) -> Element<'_, WelcomeMessage> {
         feature_grid(state),
         Space::new().height(Length::Fixed(28.0)),
         cta_row(state),
-        Space::new().height(Length::Fixed(100.0)),
+        Space::new().height(Length::Fixed(80.0)),
         legend_strip(state),
     ]
     .max_width(820)
