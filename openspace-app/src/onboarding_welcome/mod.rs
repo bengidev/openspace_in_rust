@@ -1,14 +1,15 @@
 //! First-run welcome window.
 //!
-//! See `persistence.rs` for the sentinel-file flag that ensures the
-//! window is shown only once, and `ascii_orb.rs` for the pixel
-//! particle canvas program rendered in the welcome hero. The
-//! welcome state + view module is added in a follow-up commit.
+//! See `welcome.rs` for the state + view, `ascii_orb.rs` for the
+//! pixel-particle canvas program, and `persistence.rs` for the
+//! sentinel-file flag that ensures the window is shown only once.
 
 pub mod ascii_orb;
 pub mod persistence;
+pub mod welcome;
 
 pub use persistence::{
     FileWelcomePersistence, InMemoryWelcomePersistence, WelcomePersistence,
     WelcomePersistenceError,
 };
+pub use welcome::{WelcomeMessage, WelcomeOutcome, WelcomeState, view};
