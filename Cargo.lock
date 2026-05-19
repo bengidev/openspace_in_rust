@@ -3521,27 +3521,12 @@ dependencies = [
 name = "openspace-app"
 version = "0.1.0"
 dependencies = [
- "anyhow",
- "directories",
  "iced",
- "openspace-ai",
- "openspace-chat",
- "openspace-core",
- "openspace-editor",
- "openspace-fs",
- "openspace-git",
- "openspace-lsp",
- "openspace-platform",
- "openspace-secrets",
- "openspace-storage",
- "openspace-terminal",
+ "openspace-home",
  "openspace-theme",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
+ "openspace-welcome",
  "toml",
  "tracing",
- "uuid",
 ]
 
 [[package]]
@@ -3588,6 +3573,22 @@ dependencies = [
  "openspace-core",
  "serde",
  "tokio",
+]
+
+[[package]]
+name = "openspace-home"
+version = "0.1.0"
+dependencies = [
+ "iced",
+ "openspace-chat",
+ "openspace-core",
+ "openspace-editor",
+ "openspace-terminal",
+ "openspace-theme",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -3646,6 +3647,17 @@ name = "openspace-theme"
 version = "0.1.0"
 dependencies = [
  "iced",
+]
+
+[[package]]
+name = "openspace-welcome"
+version = "0.1.0"
+dependencies = [
+ "directories",
+ "iced",
+ "openspace-theme",
+ "tempfile",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

@@ -13,6 +13,8 @@ members = [
     "openspace-lsp",
     "openspace-fs",
     "openspace-git",
+    "openspace-welcome",
+    "openspace-home",
 ]
 resolver = "3"
 
