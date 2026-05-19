@@ -9,7 +9,7 @@
 
 use vte::{Params, Parser, Perform};
 
-use crate::domain::{Cell, CellAttrs, CursorPos, GridSize, Snapshot};
+use crate::domain::{Cell, CellAttrs, Color, CursorPos, GridSize, Snapshot};
 
 // ── Emulator ──────────────────────────────────────────────────────────────────
 
@@ -151,8 +151,120 @@ impl Perform for Emulator {
         }
     }
 
-    fn csi_dispatch(&mut self, _params: &Params, _intermediates: &[u8], _ignore: bool, _action: char) {
-        // Stub — extended in commits 3 and 4.
+    fn csi_dispatch(
+        &mut self,
+        params: &Params,
+        _intermediates: &[u8],
+        _ignore: bool,
+        action: char,
+    ) {
+        // SGR — Select Graphic Rendition; all other actions handled in commit 4.
+        if action == 'm' {
+            apply_sgr(&mut self.attrs, params);
+        }
+    }
+}
+
+// ── SGR handler ───────────────────────────────────────────────────────────────
+
+/// Apply SGR (Select Graphic Rendition) params to `attrs`.
+///
+/// Each item from `params.iter()` is a `&[u16]` sub-param slice.
+/// For most codes it is a single element. For 256-color / RGB the
+/// colour type code (38 or 48) and its arguments arrive as separate
+/// params (e.g. `[38]`, `[5]`, `[n]`).
+fn apply_sgr(attrs: &mut CellAttrs, params: &Params) {
+    let mut iter = params.iter().peekable();
+
+    // Empty params list means SGR 0 (reset).
+    if iter.peek().is_none() {
+        *attrs = CellAttrs::default();
+        return;
+    }
+
+    while let Some(param) = iter.next() {
+        let code = param.first().copied().unwrap_or(0);
+        match code {
+            // Reset
+            0 => *attrs = CellAttrs::default(),
+            // Bold on / off
+            1 => attrs.bold = true,
+            22 => attrs.bold = false,
+            // Foreground basic colors (30–37)
+            30 => attrs.fg = Color::Black,
+            31 => attrs.fg = Color::Red,
+            32 => attrs.fg = Color::Green,
+            33 => attrs.fg = Color::Yellow,
+            34 => attrs.fg = Color::Blue,
+            35 => attrs.fg = Color::Magenta,
+            36 => attrs.fg = Color::Cyan,
+            37 => attrs.fg = Color::White,
+            39 => attrs.fg = Color::Default,
+            // Background basic colors (40–47)
+            40 => attrs.bg = Color::Black,
+            41 => attrs.bg = Color::Red,
+            42 => attrs.bg = Color::Green,
+            43 => attrs.bg = Color::Yellow,
+            44 => attrs.bg = Color::Blue,
+            45 => attrs.bg = Color::Magenta,
+            46 => attrs.bg = Color::Cyan,
+            47 => attrs.bg = Color::White,
+            49 => attrs.bg = Color::Default,
+            // Bright foreground (90–97)
+            90 => attrs.fg = Color::BrightBlack,
+            91 => attrs.fg = Color::BrightRed,
+            92 => attrs.fg = Color::BrightGreen,
+            93 => attrs.fg = Color::BrightYellow,
+            94 => attrs.fg = Color::BrightBlue,
+            95 => attrs.fg = Color::BrightMagenta,
+            96 => attrs.fg = Color::BrightCyan,
+            97 => attrs.fg = Color::BrightWhite,
+            // Bright background (100–107)
+            100 => attrs.bg = Color::BrightBlack,
+            101 => attrs.bg = Color::BrightRed,
+            102 => attrs.bg = Color::BrightGreen,
+            103 => attrs.bg = Color::BrightYellow,
+            104 => attrs.bg = Color::BrightBlue,
+            105 => attrs.bg = Color::BrightMagenta,
+            106 => attrs.bg = Color::BrightCyan,
+            107 => attrs.bg = Color::BrightWhite,
+            // Extended color: 38 or 48 followed by 5;n or 2;r;g;b
+            38 | 48 => {
+                let is_fg = code == 38;
+                // Peek at next param for the sub-type (5 = indexed, 2 = RGB).
+                if let Some(sub) = iter.next() {
+                    let sub_code = sub.first().copied().unwrap_or(0);
+                    match sub_code {
+                        5 => {
+                            // 256-color indexed
+                            if let Some(idx_param) = iter.next() {
+                                let idx = idx_param.first().copied().unwrap_or(0) as u8;
+                                if is_fg {
+                                    attrs.fg = Color::Indexed(idx);
+                                } else {
+                                    attrs.bg = Color::Indexed(idx);
+                                }
+                            }
+                        }
+                        2 => {
+                            // 24-bit RGB
+                            let r = iter.next().and_then(|p| p.first().copied()).unwrap_or(0) as u8;
+                            let g = iter.next().and_then(|p| p.first().copied()).unwrap_or(0) as u8;
+                            let b = iter.next().and_then(|p| p.first().copied()).unwrap_or(0) as u8;
+                            if is_fg {
+                                attrs.fg = Color::Rgb(r, g, b);
+                            } else {
+                                attrs.bg = Color::Rgb(r, g, b);
+                            }
+                        }
+                        // Unknown sub-type — ignore.
+                        _ => {}
+                    }
+                }
+            }
+            // Unknown SGR code — silently ignore.
+            _ => {}
+        }
     }
 }
 
@@ -295,5 +407,92 @@ mod tests {
         // Original snapshot unchanged
         assert_eq!(snap1.grid[0][0].ch, 'H');
         assert_ne!(snap1.grid[0][0], snap2.grid[0][0]);
+    }
+
+    // ── SGR tests ─────────────────────────────────────────────────────────────
+
+    // Helper: build a CSI SGR byte sequence from a list of numeric params.
+    // e.g. sgr(&[1]) → b"\x1b[1m", sgr(&[38,5,200]) → b"\x1b[38;5;200m"
+    fn sgr_bytes(codes: &[u16]) -> Vec<u8> {
+        let parts: Vec<String> = codes.iter().map(|n| n.to_string()).collect();
+        format!("\x1b[{}m", parts.join(";")).into_bytes()
+    }
+
+    #[test]
+    fn emulator_sgr_bold_sets_bold_attr() {
+        let mut em = make(5, 10);
+        em.feed(&sgr_bytes(&[1]));
+        em.feed(b"A");
+        assert!(em.snapshot().grid[0][0].attrs.bold);
+    }
+
+    #[test]
+    fn emulator_sgr_reset_clears_bold() {
+        let mut em = make(5, 10);
+        em.feed(&sgr_bytes(&[1])); // bold on
+        em.feed(&sgr_bytes(&[0])); // reset
+        em.feed(b"A");
+        assert!(!em.snapshot().grid[0][0].attrs.bold);
+    }
+
+    #[test]
+    fn emulator_sgr_fg_30_sets_black() {
+        let mut em = make(5, 10);
+        em.feed(&sgr_bytes(&[30]));
+        em.feed(b"A");
+        assert_eq!(em.snapshot().grid[0][0].attrs.fg, Color::Black);
+    }
+
+    #[test]
+    fn emulator_sgr_fg_31_sets_red() {
+        let mut em = make(5, 10);
+        em.feed(&sgr_bytes(&[31]));
+        em.feed(b"A");
+        assert_eq!(em.snapshot().grid[0][0].attrs.fg, Color::Red);
+    }
+
+    #[test]
+    fn emulator_sgr_bg_44_sets_blue() {
+        let mut em = make(5, 10);
+        em.feed(&sgr_bytes(&[44]));
+        em.feed(b"A");
+        assert_eq!(em.snapshot().grid[0][0].attrs.bg, Color::Blue);
+    }
+
+    #[test]
+    fn emulator_sgr_fg_91_sets_bright_red() {
+        let mut em = make(5, 10);
+        em.feed(&sgr_bytes(&[91]));
+        em.feed(b"A");
+        assert_eq!(em.snapshot().grid[0][0].attrs.fg, Color::BrightRed);
+    }
+
+    #[test]
+    fn emulator_sgr_fg_indexed_38_5_sets_indexed() {
+        let mut em = make(5, 10);
+        em.feed(&sgr_bytes(&[38, 5, 200]));
+        em.feed(b"A");
+        assert_eq!(em.snapshot().grid[0][0].attrs.fg, Color::Indexed(200));
+    }
+
+    #[test]
+    fn emulator_sgr_fg_rgb_38_2_sets_rgb() {
+        let mut em = make(5, 10);
+        em.feed(&sgr_bytes(&[38, 2, 10, 20, 30]));
+        em.feed(b"A");
+        assert_eq!(em.snapshot().grid[0][0].attrs.fg, Color::Rgb(10, 20, 30));
+    }
+
+    #[test]
+    fn emulator_sgr_default_param_resets() {
+        let mut em = make(5, 10);
+        em.feed(&sgr_bytes(&[1])); // bold on
+        em.feed(&sgr_bytes(&[31])); // fg red
+        // Empty SGR (ESC[m) should reset
+        em.feed(b"\x1b[m");
+        em.feed(b"A");
+        let cell = em.snapshot().grid[0][0];
+        assert!(!cell.attrs.bold);
+        assert_eq!(cell.attrs.fg, Color::Default);
     }
 }
