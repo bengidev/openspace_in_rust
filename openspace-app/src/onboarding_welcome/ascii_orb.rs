@@ -88,10 +88,60 @@ const JET_SEGMENTS: usize = 16;
 const SNAP_GRID: f32 = 3.0;
 
 // ---------------------------------------------------------------------------
+// Hold-to-zoom dynamics
+// ---------------------------------------------------------------------------
+
+/// Speed multiplier reached at maximum hold progress (the "final
+/// form"). The galaxy stays at 1× when not held; while held, time
+/// stretches up to this ceiling. Tuned to keep the spiral pattern
+/// legible at the climax — pushing this much higher tears the arms
+/// apart visually.
+pub const MAX_SPEED_MULTIPLIER: f32 = 3.0;
+
+/// Hard ceiling enforced inside the canvas program so a buggy
+/// caller cannot drive `t` to infinity. Set fractionally above the
+/// natural ceiling so eased values can briefly overshoot during
+/// transitions without being clipped.
+pub const SPEED_CLAMP: f32 = MAX_SPEED_MULTIPLIER + 0.5;
+
+/// Zoom factor reached at maximum hold progress. The default rest
+/// state is `1.0` (fit-to-bounds); higher values dolly the galaxy
+/// in toward the centre so finer detail becomes legible.
+pub const MAX_ZOOM: f32 = 1.6;
+
+/// Translate a normalised hold-progress in `[0, 1]` into the
+/// `(speed_multiplier, zoom)` target the canvas should ease toward.
+///
+/// `0.0` is the rest state (1× speed, fit-to-bounds). `1.0` is the
+/// final form (`MAX_SPEED_MULTIPLIER` and `MAX_ZOOM`). Values
+/// outside `[0, 1]` are clamped so the call-site can pass raw
+/// integration output without re-checking bounds.
+pub fn dynamics_for_progress(progress: f32) -> (f32, f32) {
+    let p = progress.clamp(0.0, 1.0);
+    let speed = 1.0 + (MAX_SPEED_MULTIPLIER - 1.0) * p;
+    let zoom = 1.0 + (MAX_ZOOM - 1.0) * p;
+    (speed, zoom)
+}
+
+// ---------------------------------------------------------------------------
 // Public canvas program
 // ---------------------------------------------------------------------------
 
 /// Iced canvas program rendering the welcome galaxy orb.
+///
+/// In addition to the time-driven inputs, the program carries two
+/// presentation knobs that can be animated by the parent:
+///
+/// * `speed_multiplier` scales `t` uniformly, so the entire galaxy
+///   speeds up or slows down without any layer needing its own
+///   bespoke speed knob.
+/// * `zoom` scales the logical→screen projection around the canvas
+///   centre, so the galaxy "dollies in" and the user can read finer
+///   detail (arm knots, jet wobble, nucleus shimmer).
+///
+/// Both fields are plain `f32`s rather than animation handles —
+/// easing is the parent's job, the canvas just renders whatever it
+/// is handed each frame.
 #[derive(Debug, Clone, Copy)]
 pub struct AsciiOrbProgram {
     theme: OpenSpaceTheme,
@@ -102,14 +152,45 @@ pub struct AsciiOrbProgram {
     /// Most recent tick. Cached separately so we don't query the
     /// system clock from the render path.
     now: Instant,
+    /// Uniform scalar applied to elapsed seconds. `1.0` is the
+    /// default rest state; higher values fast-forward every layer
+    /// in lockstep.
+    speed_multiplier: f32,
+    /// Uniform scale applied to the logical→screen projection.
+    /// `1.0` fits the galaxy to its widget bounds; higher values
+    /// crop in to surface the inner-disc detail.
+    zoom: f32,
 }
 
 impl AsciiOrbProgram {
+    /// Build the program at rest — speed and zoom both clamped to
+    /// the default `1.0`. Used by call-sites that do not yet drive
+    /// the click-to-zoom behaviour and by the unit tests.
     pub fn new(theme: OpenSpaceTheme, started_at: Instant, now: Instant) -> Self {
+        Self::with_dynamics(theme, started_at, now, 1.0, 1.0)
+    }
+
+    /// Build the program with caller-specified speed and zoom.
+    ///
+    /// Both scalars are sanitised here so the render path can treat
+    /// them as well-behaved: `speed_multiplier` is clamped into
+    /// `[0.0, SPEED_CLAMP]` and `zoom` into `[1.0, MAX_ZOOM]`.
+    /// Callers driving the hold-to-zoom behaviour should pass the
+    /// *eased* (interpolated) values, not the raw progress targets,
+    /// so the transition reads as a smooth dolly rather than a snap.
+    pub fn with_dynamics(
+        theme: OpenSpaceTheme,
+        started_at: Instant,
+        now: Instant,
+        speed_multiplier: f32,
+        zoom: f32,
+    ) -> Self {
         Self {
             theme,
             started_at,
             now,
+            speed_multiplier: speed_multiplier.clamp(0.0, SPEED_CLAMP),
+            zoom: zoom.clamp(1.0, MAX_ZOOM),
         }
     }
 
@@ -132,12 +213,20 @@ impl<Message> Program<Message> for AsciiOrbProgram {
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
         let mut frame = Frame::new(renderer, bounds.size());
-        let t = self.elapsed_seconds();
+        // Scale elapsed time by the caller-supplied multiplier so
+        // every layer speeds up in lockstep. Layers see exactly the
+        // same `t` they always would; the only thing that changes
+        // is how quickly that `t` advances.
+        let t = self.elapsed_seconds() * self.speed_multiplier;
 
         // Compute a uniform scale that fits the logical 360x240
         // canvas inside the actual widget bounds while preserving
-        // aspect, then center the cluster.
-        let scale = (bounds.width / LOGICAL_SIZE.width).min(bounds.height / LOGICAL_SIZE.height);
+        // aspect, then center the cluster. The `zoom` factor
+        // multiplies the fit-scale so callers can dolly in around
+        // the canvas centre without changing layout.
+        let fit_scale =
+            (bounds.width / LOGICAL_SIZE.width).min(bounds.height / LOGICAL_SIZE.height);
+        let scale = fit_scale * self.zoom;
         let translate = Point {
             x: (bounds.width - LOGICAL_SIZE.width * scale) * 0.5,
             y: (bounds.height - LOGICAL_SIZE.height * scale) * 0.5,
@@ -1141,5 +1230,65 @@ mod tests {
             assert!((0.0..=1.0).contains(&c.b));
             assert!((0.0..=1.0).contains(&c.a));
         }
+    }
+
+    #[test]
+    fn dynamics_for_progress_anchors_endpoints() {
+        let (speed_min, zoom_min) = dynamics_for_progress(0.0);
+        assert!((speed_min - 1.0).abs() < 1e-6);
+        assert!((zoom_min - 1.0).abs() < 1e-6);
+
+        let (speed_max, zoom_max) = dynamics_for_progress(1.0);
+        assert!((speed_max - MAX_SPEED_MULTIPLIER).abs() < 1e-6);
+        assert!((zoom_max - MAX_ZOOM).abs() < 1e-6);
+    }
+
+    #[test]
+    fn dynamics_for_progress_is_monotonic() {
+        let mut prev_speed = 0.0_f32;
+        let mut prev_zoom = 0.0_f32;
+        for i in 0..=20 {
+            let p = i as f32 / 20.0;
+            let (speed, zoom) = dynamics_for_progress(p);
+            assert!(
+                speed >= prev_speed - 1e-6,
+                "speed regressed at p={p}: prev={prev_speed} cur={speed}"
+            );
+            assert!(
+                zoom >= prev_zoom - 1e-6,
+                "zoom regressed at p={p}: prev={prev_zoom} cur={zoom}"
+            );
+            prev_speed = speed;
+            prev_zoom = zoom;
+        }
+    }
+
+    #[test]
+    fn dynamics_for_progress_clamps_out_of_range_inputs() {
+        assert_eq!(dynamics_for_progress(-1.0), dynamics_for_progress(0.0));
+        assert_eq!(dynamics_for_progress(2.0), dynamics_for_progress(1.0));
+    }
+
+    #[test]
+    fn with_dynamics_clamps_speed_and_zoom_into_safe_range() {
+        let theme = OpenSpaceTheme::dark();
+        let now = Instant::now();
+
+        let saturated = AsciiOrbProgram::with_dynamics(theme, now, now, 999.0, 999.0);
+        assert!(saturated.speed_multiplier <= SPEED_CLAMP + 1e-6);
+        assert!(saturated.zoom <= MAX_ZOOM + 1e-6);
+
+        let underflow = AsciiOrbProgram::with_dynamics(theme, now, now, -5.0, 0.2);
+        assert!(underflow.speed_multiplier >= 0.0);
+        assert!((underflow.zoom - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn new_defaults_to_rest_state() {
+        let theme = OpenSpaceTheme::dark();
+        let now = Instant::now();
+        let orb = AsciiOrbProgram::new(theme, now, now);
+        assert!((orb.speed_multiplier - 1.0).abs() < 1e-6);
+        assert!((orb.zoom - 1.0).abs() < 1e-6);
     }
 }

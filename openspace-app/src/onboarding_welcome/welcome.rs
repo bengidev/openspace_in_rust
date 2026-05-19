@@ -14,17 +14,17 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use iced::Length;
-use iced::Theme;
 use iced::alignment::{Horizontal, Vertical};
 use iced::widget::canvas::Canvas;
-use iced::widget::{Column, Row, Space, button, column, container, row, text};
+use iced::widget::{button, column, container, row, text, Column, MouseArea, Row, Space};
+use iced::Length;
+use iced::Theme;
 use iced::{Element, Subscription};
 
 use openspace_theme::theme::OpenSpaceTheme;
 use openspace_theme::tokens::{BackgroundToken, BorderToken, ForegroundToken, ThemeMode};
 
-use super::ascii_orb::AsciiOrbProgram;
+use super::ascii_orb::{dynamics_for_progress, AsciiOrbProgram};
 use super::persistence::{WelcomePersistence, WelcomePersistenceError};
 
 // ---------------------------------------------------------------------------
@@ -37,12 +37,40 @@ use super::persistence::{WelcomePersistence, WelcomePersistenceError};
 /// are monotonic `Instant`s so the orb canvas can run a pure draw
 /// based on elapsed seconds without ever calling `Instant::now()` in
 /// the render path.
+///
+/// The hold-to-zoom interaction is driven by three fields:
+///
+/// * `is_holding` — set when the user presses on the orb, cleared
+///   when they release. Sticky between ticks.
+/// * `hold_progress` ∈ `[0, 1]` — integrated each `Tick` using a
+///   real elapsed `dt`. Grows toward `1.0` while held, decays
+///   toward `0.0` while released. Frame-rate independent.
+/// * `displayed_speed` / `displayed_zoom` — the canvas inputs
+///   derived from `hold_progress` via `dynamics_for_progress`.
+///
+/// Decoupling the boolean intent (`is_holding`) from the integrated
+/// progress lets the `Tick` reducer stay pure: every transition
+/// produces the same trajectory regardless of how often `Tick`
+/// fires, and tests can drive the timeline with synthetic
+/// `Instant`s.
 pub struct WelcomeState {
     pub theme: OpenSpaceTheme,
     pub theme_mode: ThemeMode,
     pub started_at: Instant,
     pub now: Instant,
     pub persistence: Arc<dyn WelcomePersistence>,
+    /// Whether the user is currently holding down the mouse on the
+    /// orb. Toggled by `OrbPressed` / `OrbReleased`.
+    pub is_holding: bool,
+    /// Integrated hold progress in `[0, 1]`. `0.0` is the rest
+    /// state; `1.0` is the final form.
+    pub hold_progress: f32,
+    /// Speed multiplier handed to the canvas, derived from
+    /// `hold_progress`.
+    pub displayed_speed: f32,
+    /// Zoom factor handed to the canvas, derived from
+    /// `hold_progress`.
+    pub displayed_zoom: f32,
 }
 
 impl std::fmt::Debug for WelcomeState {
@@ -51,6 +79,10 @@ impl std::fmt::Debug for WelcomeState {
             .field("theme_mode", &self.theme_mode)
             .field("started_at", &self.started_at)
             .field("now", &self.now)
+            .field("is_holding", &self.is_holding)
+            .field("hold_progress", &self.hold_progress)
+            .field("displayed_speed", &self.displayed_speed)
+            .field("displayed_zoom", &self.displayed_zoom)
             .field("persistence", &"<dyn WelcomePersistence>")
             .finish()
     }
@@ -59,12 +91,17 @@ impl std::fmt::Debug for WelcomeState {
 impl WelcomeState {
     pub fn new(persistence: Arc<dyn WelcomePersistence>, theme_mode: ThemeMode) -> Self {
         let now = Instant::now();
+        let (initial_speed, initial_zoom) = dynamics_for_progress(0.0);
         Self {
             theme: OpenSpaceTheme::from_mode(theme_mode),
             theme_mode,
             started_at: now,
             now,
             persistence,
+            is_holding: false,
+            hold_progress: 0.0,
+            displayed_speed: initial_speed,
+            displayed_zoom: initial_zoom,
         }
     }
 }
@@ -79,6 +116,12 @@ impl WelcomeState {
 pub enum WelcomeMessage {
     Tick(Instant),
     ToggleTheme,
+    /// User started holding the mouse button down on the orb.
+    /// Begins the zoom-in / speed-up ramp.
+    OrbPressed,
+    /// User released the mouse button. Begins the decay back to the
+    /// rest state.
+    OrbReleased,
     EnterPressed,
     Skipped,
 }
@@ -113,7 +156,14 @@ impl WelcomeState {
     pub fn update(&mut self, message: WelcomeMessage) -> WelcomeOutcome {
         match message {
             WelcomeMessage::Tick(now) => {
+                // Compute dt against the previous tick *before*
+                // overwriting `self.now`, so each integration step
+                // uses the elapsed wall-clock between ticks rather
+                // than assuming a fixed 33ms cadence. Saturating
+                // subtraction protects against clock skew.
+                let dt = now.saturating_duration_since(self.now).as_secs_f32();
                 self.now = now;
+                self.advance_orb_progress(dt);
                 WelcomeOutcome::None
             }
             WelcomeMessage::ToggleTheme => {
@@ -124,9 +174,43 @@ impl WelcomeState {
                 self.theme = OpenSpaceTheme::from_mode(self.theme_mode);
                 WelcomeOutcome::ThemeToggled(self.theme_mode)
             }
+            WelcomeMessage::OrbPressed => {
+                self.is_holding = true;
+                WelcomeOutcome::None
+            }
+            WelcomeMessage::OrbReleased => {
+                self.is_holding = false;
+                WelcomeOutcome::None
+            }
             WelcomeMessage::EnterPressed => WelcomeOutcome::Completed,
             WelcomeMessage::Skipped => WelcomeOutcome::Skipped,
         }
+    }
+
+    /// Integrate the hold-progress trajectory by `dt` seconds and
+    /// re-derive the displayed speed/zoom from it.
+    ///
+    /// While held, progress ramps toward `1.0` at `HOLD_RAMP_PER_SEC`
+    /// (≈1.7s to fill from rest). On release it decays back toward
+    /// `0.0` at `RELEASE_RAMP_PER_SEC` (≈1.1s to drain). Linear
+    /// integration keeps the math obvious; the perceptual easing is
+    /// supplied by `dynamics_for_progress`, which is free to apply
+    /// any non-linear curve later without touching this loop.
+    fn advance_orb_progress(&mut self, dt: f32) {
+        const HOLD_RAMP_PER_SEC: f32 = 0.6;
+        const RELEASE_RAMP_PER_SEC: f32 = 0.9;
+
+        let dt = dt.clamp(0.0, 0.25);
+        let delta = if self.is_holding {
+            HOLD_RAMP_PER_SEC * dt
+        } else {
+            -RELEASE_RAMP_PER_SEC * dt
+        };
+        self.hold_progress = (self.hold_progress + delta).clamp(0.0, 1.0);
+
+        let (speed, zoom) = dynamics_for_progress(self.hold_progress);
+        self.displayed_speed = speed;
+        self.displayed_zoom = zoom;
     }
 
     /// Subscription driving the orb animation. Targets ~30 fps which
@@ -288,14 +372,34 @@ fn hero_block(state: &WelcomeState) -> Element<'_, WelcomeMessage> {
 
     // ASCII orb canvas — the centerpiece. We give it a fixed logical
     // height so the layout is stable regardless of the window size.
-    let orb = Canvas::new(AsciiOrbProgram::new(theme, state.started_at, state.now))
-        .width(Length::Fill)
-        .height(Length::Fixed(220.0));
+    // Speed and zoom are driven by the integrated `displayed_*`
+    // fields so press-and-hold ramps the galaxy up smoothly and
+    // release lets it decay back down.
+    let orb = Canvas::new(AsciiOrbProgram::with_dynamics(
+        theme,
+        state.started_at,
+        state.now,
+        state.displayed_speed,
+        state.displayed_zoom,
+    ))
+    .width(Length::Fill)
+    .height(Length::Fixed(220.0));
+
+    // Wrap the canvas in a `MouseArea` so left-button press starts
+    // the hold ramp and release starts the decay. Iced 0.14's
+    // `Program::update` impl can't reach the host application's
+    // message stream cleanly — `MouseArea` is the idiomatic way to
+    // turn a presentational widget into a press/release surface.
+    // The pointer cursor signals the affordance.
+    let interactive_orb = MouseArea::new(orb)
+        .on_press(WelcomeMessage::OrbPressed)
+        .on_release(WelcomeMessage::OrbReleased)
+        .interaction(iced::mouse::Interaction::Pointer);
 
     // The orb sits directly on the page background — no card, no
     // border — so the particle field bleeds into the surrounding
     // chrome the way the reference recording does.
-    let orb_card = container(orb)
+    let orb_card = container(interactive_orb)
         .width(Length::Fill)
         .height(Length::Fixed(220.0));
 
@@ -307,7 +411,7 @@ fn hero_block(state: &WelcomeState) -> Element<'_, WelcomeMessage> {
                     color: Some(theme.foreground(ForegroundToken::Accent)),
                 }),
             Space::new().width(Length::Fixed(8.0)),
-            text("BOOT SEQUENCE / READY")
+            text(boot_sequence_label(state.hold_progress))
                 .size(10)
                 .style(move |_t: &Theme| text::Style {
                     color: Some(theme.foreground(ForegroundToken::Accent)),
@@ -629,6 +733,28 @@ fn is_dark(mode: ThemeMode) -> bool {
     matches!(mode, ThemeMode::Dark)
 }
 
+/// Format the badge label so users get inline feedback on how
+/// charged the orb is.
+///
+/// At rest (`progress` near `0`) we keep the original "READY" copy
+/// so the welcome screen reads identically to the previous design
+/// when the user is not interacting. Near the final form we switch
+/// the suffix to `FINAL FORM` so the climax is unambiguous.
+/// Between those endpoints we surface the speed multiplier as
+/// `Nx` (rounded to the nearest integer) so the user can read the
+/// ramp progress without staring at the orb.
+fn boot_sequence_label(hold_progress: f32) -> String {
+    let progress = hold_progress.clamp(0.0, 1.0);
+    if progress < 0.05 {
+        "BOOT SEQUENCE / READY".to_string()
+    } else if progress > 0.95 {
+        "BOOT SEQUENCE / FINAL FORM".to_string()
+    } else {
+        let (speed, _) = dynamics_for_progress(progress);
+        format!("BOOT SEQUENCE / {}x", speed.round() as u32)
+    }
+}
+
 // Suppress unused-import warning if these helpers aren't used in
 // every cfg combination.
 #[allow(dead_code)]
@@ -688,5 +814,138 @@ mod tests {
         assert!(!store.is_completed());
         super::mark_completed(&store).unwrap();
         assert!(store.is_completed());
+    }
+
+    #[test]
+    fn fresh_state_starts_at_rest() {
+        let state = WelcomeState::new(Arc::new(InMemoryWelcomePersistence::new()), ThemeMode::Dark);
+        assert!(!state.is_holding);
+        assert_eq!(state.hold_progress, 0.0);
+        let (rest_speed, rest_zoom) = dynamics_for_progress(0.0);
+        assert!((state.displayed_speed - rest_speed).abs() < 1e-6);
+        assert!((state.displayed_zoom - rest_zoom).abs() < 1e-6);
+    }
+
+    #[test]
+    fn press_then_release_toggles_is_holding_flag() {
+        let mut state =
+            WelcomeState::new(Arc::new(InMemoryWelcomePersistence::new()), ThemeMode::Dark);
+
+        let outcome = state.update(WelcomeMessage::OrbPressed);
+        assert_eq!(outcome, WelcomeOutcome::None);
+        assert!(state.is_holding);
+
+        let outcome = state.update(WelcomeMessage::OrbReleased);
+        assert_eq!(outcome, WelcomeOutcome::None);
+        assert!(!state.is_holding);
+    }
+
+    #[test]
+    fn holding_for_long_enough_reaches_final_form() {
+        let mut state =
+            WelcomeState::new(Arc::new(InMemoryWelcomePersistence::new()), ThemeMode::Dark);
+        state.update(WelcomeMessage::OrbPressed);
+
+        // 5 seconds of synthetic ticks at 33ms — comfortably above
+        // the natural fill time of ~1.7s so the integration must
+        // saturate at 1.0 even in the presence of clamping bugs.
+        let mut now = state.now;
+        for _ in 0..150 {
+            now += Duration::from_millis(33);
+            state.update(WelcomeMessage::Tick(now));
+        }
+
+        let (max_speed, max_zoom) = dynamics_for_progress(1.0);
+        assert!((state.hold_progress - 1.0).abs() < 1e-6);
+        assert!((state.displayed_speed - max_speed).abs() < 1e-6);
+        assert!((state.displayed_zoom - max_zoom).abs() < 1e-6);
+    }
+
+    #[test]
+    fn releasing_decays_progress_back_to_rest() {
+        let mut state =
+            WelcomeState::new(Arc::new(InMemoryWelcomePersistence::new()), ThemeMode::Dark);
+        state.update(WelcomeMessage::OrbPressed);
+
+        // Charge to the final form, then release.
+        let mut now = state.now;
+        for _ in 0..150 {
+            now += Duration::from_millis(33);
+            state.update(WelcomeMessage::Tick(now));
+        }
+        assert!((state.hold_progress - 1.0).abs() < 1e-6);
+
+        state.update(WelcomeMessage::OrbReleased);
+        for _ in 0..150 {
+            now += Duration::from_millis(33);
+            state.update(WelcomeMessage::Tick(now));
+        }
+
+        let (rest_speed, rest_zoom) = dynamics_for_progress(0.0);
+        assert!(state.hold_progress.abs() < 1e-6);
+        assert!((state.displayed_speed - rest_speed).abs() < 1e-6);
+        assert!((state.displayed_zoom - rest_zoom).abs() < 1e-6);
+    }
+
+    #[test]
+    fn release_mid_ramp_decays_without_first_completing() {
+        let mut state =
+            WelcomeState::new(Arc::new(InMemoryWelcomePersistence::new()), ThemeMode::Dark);
+        state.update(WelcomeMessage::OrbPressed);
+
+        // Hold briefly so we are partway up the ramp but nowhere
+        // near the final form.
+        let mut now = state.now;
+        for _ in 0..15 {
+            now += Duration::from_millis(33);
+            state.update(WelcomeMessage::Tick(now));
+        }
+        assert!(state.hold_progress > 0.0);
+        assert!(state.hold_progress < 1.0);
+        let mid_progress = state.hold_progress;
+
+        // Release mid-ramp — progress should immediately start
+        // decaying instead of climbing further.
+        state.update(WelcomeMessage::OrbReleased);
+        now += Duration::from_millis(33);
+        state.update(WelcomeMessage::Tick(now));
+        assert!(state.hold_progress < mid_progress);
+    }
+
+    #[test]
+    fn first_tick_after_press_advances_progress_proportionally_to_dt() {
+        let mut state =
+            WelcomeState::new(Arc::new(InMemoryWelcomePersistence::new()), ThemeMode::Dark);
+        state.update(WelcomeMessage::OrbPressed);
+
+        let baseline = state.hold_progress;
+        let now = state.now + Duration::from_millis(100);
+        state.update(WelcomeMessage::Tick(now));
+
+        // 100ms at HOLD_RAMP_PER_SEC=0.6 should add ~0.06 progress.
+        let delta = state.hold_progress - baseline;
+        assert!(
+            (delta - 0.06).abs() < 1e-3,
+            "expected ~0.06 progress after 100ms hold, got {delta}"
+        );
+    }
+
+    #[test]
+    fn boot_sequence_label_reflects_progress() {
+        assert_eq!(super::boot_sequence_label(0.0), "BOOT SEQUENCE / READY");
+        assert_eq!(super::boot_sequence_label(0.04), "BOOT SEQUENCE / READY");
+        assert_eq!(
+            super::boot_sequence_label(1.0),
+            "BOOT SEQUENCE / FINAL FORM"
+        );
+        assert_eq!(
+            super::boot_sequence_label(0.96),
+            "BOOT SEQUENCE / FINAL FORM"
+        );
+        // Midway should surface an `Nx` label (the exact integer
+        // depends on `dynamics_for_progress`, but it must not be
+        // the rest copy).
+        let mid = super::boot_sequence_label(0.5);
+        assert!(mid.starts_with("BOOT SEQUENCE / ") && mid.ends_with('x'));
     }
 }
