@@ -1,17 +1,27 @@
-pub mod environment_resolver;
-pub mod error;
-pub mod keychain_resolver;
-pub mod memory_resolver;
-pub mod redaction;
-pub mod resolver;
+pub mod secrets_environment_resolver;
+pub mod secrets_error;
+pub mod secrets_keychain_resolver;
+pub mod secrets_memory_resolver;
+pub mod secrets_redaction;
+pub mod secrets_resolver;
 pub mod secrets_store;
 
-pub use environment_resolver::EnvironmentResolver;
-pub use error::SecretError;
-pub use keychain_resolver::KeychainResolver;
-pub use memory_resolver::MemoryResolver;
-pub use redaction::{Redaction, redact};
-pub use resolver::SecretResolver;
+// Compat aliases. The prefixed module paths above are the
+// canonical names; these unprefixed forms keep existing call
+// sites working while the rename propagates.
+pub use secrets_environment_resolver as environment_resolver;
+pub use secrets_error as error;
+pub use secrets_keychain_resolver as keychain_resolver;
+pub use secrets_memory_resolver as memory_resolver;
+pub use secrets_redaction as redaction;
+pub use secrets_resolver as resolver;
+
+pub use secrets_environment_resolver::EnvironmentResolver;
+pub use secrets_error::SecretError;
+pub use secrets_keychain_resolver::KeychainResolver;
+pub use secrets_memory_resolver::MemoryResolver;
+pub use secrets_redaction::{redact, Redaction};
+pub use secrets_resolver::SecretResolver;
 
 #[cfg(test)]
 mod tests {

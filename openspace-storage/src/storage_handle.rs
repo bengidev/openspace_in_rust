@@ -48,7 +48,7 @@ impl StorageHandle {
             write_session_impl(&mut conn, &session)
         })
         .await
-        .map_err(|e| StorageError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?
+        .map_err(|e| StorageError::Io(std::io::Error::other(e)))?
     }
 
     pub async fn read_session(&self, id: Uuid) -> Result<Option<Session>, StorageError> {
@@ -59,7 +59,7 @@ impl StorageHandle {
             read_session_impl(&mut conn, &id_str)
         })
         .await
-        .map_err(|e| StorageError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?
+        .map_err(|e| StorageError::Io(std::io::Error::other(e)))?
     }
 }
 

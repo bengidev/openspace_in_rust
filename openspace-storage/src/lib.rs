@@ -1,6 +1,9 @@
-pub mod migrations;
 pub mod storage_error;
 pub mod storage_handle;
+pub mod storage_migrations;
+
+// Compat alias.
+pub use storage_migrations as migrations;
 
 pub use storage_error::StorageError;
 pub use storage_handle::StorageHandle;
@@ -43,8 +46,10 @@ mod tests {
                     rules: vec!["read".to_string(), "write".to_string()],
                 },
             ] {
-                let mut session =
-                    Session::new(PathBuf::from("/home/user/project"), SessionDescriptor::new("variant-test"));
+                let mut session = Session::new(
+                    PathBuf::from("/home/user/project"),
+                    SessionDescriptor::new("variant-test"),
+                );
                 session.mode = mode;
                 session.permission = permission;
 
