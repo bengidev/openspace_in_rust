@@ -5,28 +5,13 @@ edition = "2024"
 
 [dependencies]
 iced = { workspace = true }
-tokio = { workspace = true }
-anyhow = { workspace = true }
 tracing = { workspace = true }
-uuid = { workspace = true }
-directories = { workspace = true }
-thiserror = { workspace = true }
-openspace-core = { path = "../openspace-core" }
 openspace-theme = { path = "../openspace-theme" }
-openspace-platform = { path = "../openspace-platform" }
-openspace-storage = { path = "../openspace-storage" }
-openspace-secrets = { path = "../openspace-secrets" }
-openspace-terminal = { path = "../openspace-terminal" }
-openspace-chat = { path = "../openspace-chat" }
-openspace-ai = { path = "../openspace-ai" }
-openspace-editor = { path = "../openspace-editor" }
-openspace-lsp = { path = "../openspace-lsp" }
-openspace-fs = { path = "../openspace-fs" }
-openspace-git = { path = "../openspace-git" }
+openspace-welcome = { path = "../openspace-welcome" }
+openspace-home = { path = "../openspace-home" }
 
 [dev-dependencies]
 toml = "0.8"
-tempfile = "3"
 
 [[bin]]
 name = "openspace"
