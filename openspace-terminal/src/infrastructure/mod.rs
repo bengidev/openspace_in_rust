@@ -6,7 +6,9 @@
 //! [`TerminalCommands`](super::terminal_application::TerminalCommands)
 //! provider.
 
+pub mod mock_pty_adapter;
 pub mod terminal_pty_adapter;
 pub mod terminal_session;
 
+pub use mock_pty_adapter::{MockPtyAdapter, MockPtyHandle, MockPtyState, SpawnRequestSnapshot};
 pub use terminal_pty_adapter::{PortablePtyAdapter, PortablePtyHandle};
