@@ -45,23 +45,45 @@ Mode is not a global app toggle. Permission is not a global app toggle. Both are
 
 ## Workspace crate direction
 
-OpenSpace should use a feature-first Rust workspace. The app shell composes features; feature crates do not import each other directly.
+OpenSpace uses a feature-first Rust workspace. The app shell composes features; feature crates do not import each other directly. Within each feature crate, code is organised along Clean Architecture lines so domain logic stays independent of Iced and platform adapters:
 
-Baseline modules/crates:
+```
+domain          // pure value types and contracts (no Iced, no I/O)
+application     // use cases, reducers, command catalogues
+infrastructure  // OS adapters, persistence, transports
+presenter       // Iced view + canvas programs
+```
 
-- `openspace-core`: shared IDs, contracts, events, commands, permissions, context, actions, audit, runtime status.
-- `openspace-app`: Iced app shell, composition root, routing, command registry, keybinding resolver, runtime manager.
+Layer folders stay short (`domain`, `application`, `infrastructure`, `presenter`) — the crate name already supplies the feature scope. Files inside each layer keep the feature prefix (`welcome_state.rs`, `home_audit.rs`, `terminal_commands.rs`) so the file layout stays discoverable from `find` / IDE navigation. Sub-feature files inside the home shell follow the same rule with the sub-feature prefix.
+
+Crate map:
+
+- `openspace-core`: shared IDs, contracts, events, commands, permissions, context, actions, audit, runtime status. Files use the `core_*` prefix.
+- `openspace-theme`: semantic theme tokens and style helpers (`theme_palette`, `theme_tokens`).
 - `openspace-platform`: platform capability detection and policies.
-- `openspace-theme`: semantic theme tokens and style helpers.
-- `openspace-storage`: SQLite persistence, config, cache, migrations.
-- `openspace-secrets`: keychain, environment fallback, memory adapter, redaction.
-- `openspace-terminal`: PTY, terminal emulator state, tabs, splits, snapshots.
-- `openspace-chat`: chat workflow state, messages, streaming lifecycle, action cards.
-- `openspace-ai`: provider abstraction, streaming, model registry, ContextPack assembly, action proposal mapping.
-- `openspace-fs`: project tree, watcher, indexing, search metadata.
-- `openspace-git`: git status, diff, stage, unstage, commit, commit-message context.
-- `openspace-editor`: buffers, file tabs, syntax highlighting, dirty state, AI review surface.
-- `openspace-lsp`: language-server process lifecycle, diagnostics, completion and code-intelligence boundaries.
+- `openspace-storage`: SQLite persistence, config, cache, migrations (`storage_*`).
+- `openspace-secrets`: keychain, environment fallback, memory adapter, redaction (`secrets_*`).
+- `openspace-welcome`: first-run welcome window. Layered: `domain`, `application`, `infrastructure`, `presenter`.
+- `openspace-home`: post-welcome workspace shell — top bar, panels, center surface, command palette, app router, runtime manager, audit sinks. Layered: `domain`, `application`, `infrastructure`, `presenter`.
+- `openspace-app`: composition root. Mounts the welcome → home routing pipeline and runs the Iced event loop. Layered: `domain`, `application`, `infrastructure`, `presenter`.
+- `openspace-terminal`: PTY, terminal emulator state, tabs, splits, snapshots. Layered: `domain`, `application`, `infrastructure`, `presenter`.
+- `openspace-chat`: chat workflow state, messages, streaming lifecycle, action cards. Layered: `domain`, `application`, `infrastructure`, `presenter`.
+- `openspace-ai`: provider abstraction, streaming, model registry, ContextPack assembly, action proposal mapping. Layered: `domain`, `application`, `infrastructure`, `presenter`.
+- `openspace-fs`: project tree, watcher, indexing, search metadata. Layered: `domain`, `application`, `infrastructure`, `presenter`.
+- `openspace-git`: git status, diff, stage, unstage, commit, commit-message context. Layered: `domain`, `application`, `infrastructure`, `presenter`.
+- `openspace-editor`: buffers, file tabs, syntax highlighting, dirty state, AI review surface. Layered: `domain`, `application`, `infrastructure`, `presenter`.
+- `openspace-lsp`: language-server process lifecycle, diagnostics, completion and code-intelligence boundaries. Layered: `domain`, `application`, `infrastructure`, `presenter`.
+
+Composition flows top-down:
+
+```
+openspace-app
+ ├── openspace-welcome   (first-run welcome window)
+ └── openspace-home      (post-welcome workspace shell)
+      └── sub-features (terminal, chat, editor, ai, fs, git, lsp)
+```
+
+Shared crates sit beside this tree and are pulled in by whichever feature needs them.
 
 ## Dependency rules
 
@@ -75,13 +97,13 @@ Baseline modules/crates:
 
 ## File and module naming rules
 
-- Use feature-first organization.
-- Feature-level files use the feature prefix.
-- Sub-feature files use the sub-feature prefix.
-- Create files by scope when the scope has real content.
-- Avoid large generic catch-all files.
-- Public interfaces expose stable contracts outward.
-- Implementation details remain inside the owning feature.
+- Use feature-first organization. Each feature crate is named `openspace-<feature>`.
+- Within each feature crate, source code is split into four short layer modules: `domain`, `application`, `infrastructure`, `presenter`. The crate name supplies the feature scope, so the layer folders themselves stay unprefixed.
+- Files inside each layer use the feature prefix (`welcome_state.rs`, `home_audit.rs`, `terminal_commands.rs`).
+- Sub-feature files use the sub-feature prefix when the sub-feature lives inside another feature crate (`chat_messages.rs` inside `openspace-chat`).
+- Create files by scope when the scope has real content. Avoid large generic catch-all files.
+- Public interfaces expose stable contracts outward (re-exports at `lib.rs`); implementation details remain inside the owning layer.
+- Shared crates (`openspace-core`, `openspace-theme`, `openspace-storage`, `openspace-secrets`) follow the same file-prefix rule (`core_audit.rs`, `theme_tokens.rs`, `storage_handle.rs`, `secrets_redaction.rs`) but stay flat — they do not impose their own four-layer structure on consumers.
 
 The folder structure is a discoverability tool. It is not a claim that the entire project follows a broad enterprise-layer architecture.
 
