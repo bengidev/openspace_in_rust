@@ -44,6 +44,8 @@ use iced::Theme;
 use openspace_theme::theme::OpenSpaceTheme;
 use openspace_theme::tokens::{ForegroundToken, StatusToken};
 
+use crate::application::welcome_dynamics::{MAX_ZOOM, SPEED_CLAMP};
+
 /// Logical canvas the particle field is laid out in. The actual
 /// canvas widget is scaled to fit while preserving aspect.
 const LOGICAL_SIZE: Size = Size {
@@ -90,38 +92,13 @@ const SNAP_GRID: f32 = 3.0;
 // ---------------------------------------------------------------------------
 // Hold-to-zoom dynamics
 // ---------------------------------------------------------------------------
-
-/// Speed multiplier reached at maximum hold progress (the "final
-/// form"). The galaxy stays at 1× when not held; while held, time
-/// stretches up to this ceiling. Tuned to keep the spiral pattern
-/// legible at the climax — pushing this much higher tears the arms
-/// apart visually.
-pub const MAX_SPEED_MULTIPLIER: f32 = 3.0;
-
-/// Hard ceiling enforced inside the canvas program so a buggy
-/// caller cannot drive `t` to infinity. Set fractionally above the
-/// natural ceiling so eased values can briefly overshoot during
-/// transitions without being clipped.
-pub const SPEED_CLAMP: f32 = MAX_SPEED_MULTIPLIER + 0.5;
-
-/// Zoom factor reached at maximum hold progress. The default rest
-/// state is `1.0` (fit-to-bounds); higher values dolly the galaxy
-/// in toward the centre so finer detail becomes legible.
-pub const MAX_ZOOM: f32 = 1.6;
-
-/// Translate a normalised hold-progress in `[0, 1]` into the
-/// `(speed_multiplier, zoom)` target the canvas should ease toward.
-///
-/// `0.0` is the rest state (1× speed, fit-to-bounds). `1.0` is the
-/// final form (`MAX_SPEED_MULTIPLIER` and `MAX_ZOOM`). Values
-/// outside `[0, 1]` are clamped so the call-site can pass raw
-/// integration output without re-checking bounds.
-pub fn dynamics_for_progress(progress: f32) -> (f32, f32) {
-    let p = progress.clamp(0.0, 1.0);
-    let speed = 1.0 + (MAX_SPEED_MULTIPLIER - 1.0) * p;
-    let zoom = 1.0 + (MAX_ZOOM - 1.0) * p;
-    (speed, zoom)
-}
+//
+// The pure speed/zoom curve and its tuning constants live in
+// `welcome_application::welcome_dynamics`. This file only consumes
+// the resulting `speed_multiplier` and `zoom` values per frame; the
+// constants used here (`SPEED_CLAMP`, `MAX_ZOOM`) are imported above
+// so the canvas program can defensively clamp inputs without
+// duplicating tuning numbers.
 
 // ---------------------------------------------------------------------------
 // Public canvas program
@@ -1230,43 +1207,6 @@ mod tests {
             assert!((0.0..=1.0).contains(&c.b));
             assert!((0.0..=1.0).contains(&c.a));
         }
-    }
-
-    #[test]
-    fn dynamics_for_progress_anchors_endpoints() {
-        let (speed_min, zoom_min) = dynamics_for_progress(0.0);
-        assert!((speed_min - 1.0).abs() < 1e-6);
-        assert!((zoom_min - 1.0).abs() < 1e-6);
-
-        let (speed_max, zoom_max) = dynamics_for_progress(1.0);
-        assert!((speed_max - MAX_SPEED_MULTIPLIER).abs() < 1e-6);
-        assert!((zoom_max - MAX_ZOOM).abs() < 1e-6);
-    }
-
-    #[test]
-    fn dynamics_for_progress_is_monotonic() {
-        let mut prev_speed = 0.0_f32;
-        let mut prev_zoom = 0.0_f32;
-        for i in 0..=20 {
-            let p = i as f32 / 20.0;
-            let (speed, zoom) = dynamics_for_progress(p);
-            assert!(
-                speed >= prev_speed - 1e-6,
-                "speed regressed at p={p}: prev={prev_speed} cur={speed}"
-            );
-            assert!(
-                zoom >= prev_zoom - 1e-6,
-                "zoom regressed at p={p}: prev={prev_zoom} cur={zoom}"
-            );
-            prev_speed = speed;
-            prev_zoom = zoom;
-        }
-    }
-
-    #[test]
-    fn dynamics_for_progress_clamps_out_of_range_inputs() {
-        assert_eq!(dynamics_for_progress(-1.0), dynamics_for_progress(0.0));
-        assert_eq!(dynamics_for_progress(2.0), dynamics_for_progress(1.0));
     }
 
     #[test]
