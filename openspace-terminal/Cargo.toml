@@ -7,4 +7,6 @@ edition = "2024"
 portable-pty = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
+thiserror = { workspace = true }
 openspace-core = { path = "../openspace-core" }
+openspace-platform = { path = "../openspace-platform" }
