@@ -158,9 +158,148 @@ impl Perform for Emulator {
         _ignore: bool,
         action: char,
     ) {
-        // SGR — Select Graphic Rendition; all other actions handled in commit 4.
-        if action == 'm' {
-            apply_sgr(&mut self.attrs, params);
+        // Helper: first param value, defaulting to `default` if absent or zero.
+        let p0 = |default: usize| -> usize {
+            params
+                .iter()
+                .next()
+                .and_then(|s| s.first().copied())
+                .map(|v| if v == 0 { default } else { v as usize })
+                .unwrap_or(default)
+        };
+
+        let rows = self.size.rows;
+        let cols = self.size.cols;
+
+        match action {
+            // SGR — Select Graphic Rendition
+            'm' => apply_sgr(&mut self.attrs, params),
+
+            // CUU — cursor up
+            'A' => {
+                let n = p0(1);
+                self.cursor.row = self.cursor.row.saturating_sub(n);
+            }
+            // CUD — cursor down
+            'B' => {
+                let n = p0(1);
+                self.cursor.row = (self.cursor.row + n).min(rows - 1);
+            }
+            // CUF — cursor forward
+            'C' => {
+                let n = p0(1);
+                self.cursor.col = (self.cursor.col + n).min(cols - 1);
+            }
+            // CUB — cursor back
+            'D' => {
+                let n = p0(1);
+                self.cursor.col = self.cursor.col.saturating_sub(n);
+            }
+            // CUP / HVP — set cursor position (1-based params)
+            'H' | 'f' => {
+                let mut iter = params.iter();
+                let row = iter
+                    .next()
+                    .and_then(|s| s.first().copied())
+                    .map(|v| if v == 0 { 1 } else { v as usize })
+                    .unwrap_or(1);
+                let col = iter
+                    .next()
+                    .and_then(|s| s.first().copied())
+                    .map(|v| if v == 0 { 1 } else { v as usize })
+                    .unwrap_or(1);
+                self.cursor.row = (row - 1).min(rows - 1);
+                self.cursor.col = (col - 1).min(cols - 1);
+            }
+            // CHA — cursor horizontal absolute (1-based)
+            'G' => {
+                let n = p0(1);
+                self.cursor.col = (n - 1).min(cols - 1);
+            }
+            // ED — erase in display
+            'J' => {
+                let n = params
+                    .iter()
+                    .next()
+                    .and_then(|s| s.first().copied())
+                    .unwrap_or(0);
+                match n {
+                    // 0 or absent: cursor to end of grid
+                    0 => {
+                        let (r, c) = (self.cursor.row, self.cursor.col);
+                        for col in c..cols {
+                            self.grid[r][col] = Cell::blank();
+                        }
+                        for row in (r + 1)..rows {
+                            for col in 0..cols {
+                                self.grid[row][col] = Cell::blank();
+                            }
+                        }
+                    }
+                    // 1: start of grid to cursor (inclusive)
+                    1 => {
+                        let (r, c) = (self.cursor.row, self.cursor.col);
+                        for row in 0..r {
+                            for col in 0..cols {
+                                self.grid[row][col] = Cell::blank();
+                            }
+                        }
+                        for col in 0..=c {
+                            self.grid[r][col] = Cell::blank();
+                        }
+                    }
+                    // 2: erase entire grid (cursor unchanged)
+                    2 => {
+                        for row in 0..rows {
+                            for col in 0..cols {
+                                self.grid[row][col] = Cell::blank();
+                            }
+                        }
+                    }
+                    // 3: erase entire grid AND clear scrollback
+                    3 => {
+                        for row in 0..rows {
+                            for col in 0..cols {
+                                self.grid[row][col] = Cell::blank();
+                            }
+                        }
+                        self.scrollback.clear();
+                    }
+                    _ => {}
+                }
+            }
+            // EL — erase in line
+            'K' => {
+                let n = params
+                    .iter()
+                    .next()
+                    .and_then(|s| s.first().copied())
+                    .unwrap_or(0);
+                let (r, c) = (self.cursor.row, self.cursor.col);
+                match n {
+                    // 0 or absent: cursor to end of line
+                    0 => {
+                        for col in c..cols {
+                            self.grid[r][col] = Cell::blank();
+                        }
+                    }
+                    // 1: start of line to cursor (inclusive)
+                    1 => {
+                        for col in 0..=c {
+                            self.grid[r][col] = Cell::blank();
+                        }
+                    }
+                    // 2: entire line
+                    2 => {
+                        for col in 0..cols {
+                            self.grid[r][col] = Cell::blank();
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            // All other CSI actions silently ignored.
+            _ => {}
         }
     }
 }
@@ -494,5 +633,153 @@ mod tests {
         let cell = em.snapshot().grid[0][0];
         assert!(!cell.attrs.bold);
         assert_eq!(cell.attrs.fg, Color::Default);
+    }
+
+    // ── Cursor move + erase tests ─────────────────────────────────────────────
+
+    #[test]
+    fn emulator_cup_sets_cursor_position() {
+        let mut em = make(10, 20);
+        em.feed(b"\x1b[5;10H"); // row 5, col 10 (1-based) → (4, 9) zero-based
+        assert_eq!(em.cursor(), CursorPos { row: 4, col: 9 });
+    }
+
+    #[test]
+    fn emulator_cup_clamps_to_grid() {
+        let mut em = make(5, 10);
+        em.feed(b"\x1b[99;99H");
+        assert_eq!(em.cursor(), CursorPos { row: 4, col: 9 });
+    }
+
+    #[test]
+    fn emulator_cuu_cud_cuf_cub_move_cursor() {
+        let mut em = make(10, 20);
+        // Start at (5, 10)
+        em.feed(b"\x1b[6;11H");
+        assert_eq!(em.cursor(), CursorPos { row: 5, col: 10 });
+        // Up 2
+        em.feed(b"\x1b[2A");
+        assert_eq!(em.cursor(), CursorPos { row: 3, col: 10 });
+        // Down 1
+        em.feed(b"\x1b[1B");
+        assert_eq!(em.cursor(), CursorPos { row: 4, col: 10 });
+        // Forward 3
+        em.feed(b"\x1b[3C");
+        assert_eq!(em.cursor(), CursorPos { row: 4, col: 13 });
+        // Back 5
+        em.feed(b"\x1b[5D");
+        assert_eq!(em.cursor(), CursorPos { row: 4, col: 8 });
+    }
+
+    #[test]
+    fn emulator_cha_sets_column() {
+        let mut em = make(5, 20);
+        em.feed(b"\x1b[10G"); // col 10 (1-based) → 9 zero-based
+        assert_eq!(em.cursor().col, 9);
+    }
+
+    #[test]
+    fn emulator_ed_0_erases_from_cursor() {
+        let mut em = make(3, 5);
+        feed_str(&mut em, "AAAAA");
+        feed_str(&mut em, "BBBBB");
+        feed_str(&mut em, "CCCCC");
+        // After 3 full rows in a 3-row grid: AAAAA scrolled off,
+        // grid = [BBBBB, CCCCC, blank], cursor at (2, 0).
+        // Move to (1, 2) and erase forward.
+        em.feed(b"\x1b[2;3H"); // row 2, col 3 (1-based) → (1, 2)
+        em.feed(b"\x1b[0J");
+        let snap = em.snapshot();
+        // (1,0) and (1,1) should still be 'C' (CCCCC row)
+        assert_eq!(snap.grid[1][0].ch, 'C');
+        assert_eq!(snap.grid[1][1].ch, 'C');
+        // (1,2) onward and all of row 2 should be blank
+        assert_eq!(snap.grid[1][2], Cell::blank());
+        assert_eq!(snap.grid[2][0], Cell::blank());
+    }
+
+    #[test]
+    fn emulator_ed_2_clears_entire_grid() {
+        let mut em = make(3, 5);
+        feed_str(&mut em, "Hello");
+        em.feed(b"\x1b[2J");
+        let snap = em.snapshot();
+        for row in &snap.grid {
+            for cell in row {
+                assert_eq!(*cell, Cell::blank());
+            }
+        }
+        // Cursor unchanged (still wherever it was)
+    }
+
+    #[test]
+    fn emulator_ed_3_clears_grid_and_scrollback() {
+        let mut em = make(2, 4);
+        // Fill enough to push lines into scrollback
+        feed_str(&mut em, "AAAA");
+        feed_str(&mut em, "BBBB");
+        feed_str(&mut em, "CCCC");
+        assert!(em.scrollback_len() > 0);
+        em.feed(b"\x1b[3J");
+        assert_eq!(em.scrollback_len(), 0);
+        let snap = em.snapshot();
+        for row in &snap.grid {
+            for cell in row {
+                assert_eq!(*cell, Cell::blank());
+            }
+        }
+    }
+
+    #[test]
+    fn emulator_el_0_erases_to_eol() {
+        let mut em = make(3, 5);
+        feed_str(&mut em, "ABCDE");
+        em.feed(b"\x1b[1;3H"); // move to (0, 2)
+        em.feed(b"\x1b[0K");
+        let snap = em.snapshot();
+        assert_eq!(snap.grid[0][0].ch, 'A');
+        assert_eq!(snap.grid[0][1].ch, 'B');
+        assert_eq!(snap.grid[0][2], Cell::blank());
+        assert_eq!(snap.grid[0][3], Cell::blank());
+        assert_eq!(snap.grid[0][4], Cell::blank());
+    }
+
+    #[test]
+    fn emulator_el_1_erases_from_bol() {
+        let mut em = make(3, 5);
+        feed_str(&mut em, "ABCDE");
+        em.feed(b"\x1b[1;4H"); // move to (0, 3)
+        em.feed(b"\x1b[1K");
+        let snap = em.snapshot();
+        assert_eq!(snap.grid[0][0], Cell::blank());
+        assert_eq!(snap.grid[0][1], Cell::blank());
+        assert_eq!(snap.grid[0][2], Cell::blank());
+        assert_eq!(snap.grid[0][3], Cell::blank());
+        assert_eq!(snap.grid[0][4].ch, 'E');
+    }
+
+    #[test]
+    fn emulator_el_2_erases_entire_line() {
+        let mut em = make(3, 5);
+        feed_str(&mut em, "ABCDE");
+        em.feed(b"\x1b[1;3H"); // move to (0, 2)
+        em.feed(b"\x1b[2K");
+        let snap = em.snapshot();
+        for cell in &snap.grid[0] {
+            assert_eq!(*cell, Cell::blank());
+        }
+    }
+
+    #[test]
+    fn emulator_unsupported_csi_is_silently_ignored() {
+        let mut em = make(3, 10);
+        feed_str(&mut em, "hello");
+        let before = em.snapshot();
+        // ESC[?25h (show cursor — private mode, not implemented)
+        em.feed(b"\x1b[?25h");
+        let after = em.snapshot();
+        // Grid and cursor must be unchanged
+        assert_eq!(before.grid, after.grid);
+        assert_eq!(before.cursor, after.cursor);
     }
 }
