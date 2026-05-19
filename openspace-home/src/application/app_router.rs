@@ -1,3 +1,11 @@
+//! App router — applies workspace-level commands to the session
+//! map and surfaces coarse [`AppEvent`]s for the shell to consume.
+//!
+//! Sessions are stored by id; the router owns the runtime manager
+//! and drives feature activation/deactivation in lockstep with
+//! session mode changes. Errors flow as `AppEvent::Error` rather
+//! than panicking — the shell decides how to surface them.
+
 use std::collections::HashMap;
 
 use openspace_core::app_command::{AppCommand, FeatureCommand, StorageCommand};
@@ -6,7 +14,7 @@ use openspace_core::core_errors::CoreError;
 use openspace_core::session::Session;
 use uuid::Uuid;
 
-use crate::feature_runtime::RuntimeManager;
+use crate::application::runtime_manager::RuntimeManager;
 
 #[derive(Debug, Default)]
 pub struct AppRouter {
@@ -76,18 +84,16 @@ impl AppRouter {
             AppCommand::SwitchMode { session_id, mode } => {
                 if let Some(existing) = self.sessions.get(&session_id) {
                     if existing.mode != mode {
-                        if let Some(active_id) = self.active_session_id {
-                            if active_id == session_id {
-                                if let Some(s) = self.sessions.get(&active_id) {
+                        if let Some(active_id) = self.active_session_id
+                            && active_id == session_id
+                                && let Some(s) = self.sessions.get(&active_id) {
                                     self.runtime_manager.deactivate_for_session(s);
                                 }
-                            }
-                        }
                         if let Some(session) = self.sessions.get_mut(&session_id) {
-                            session.mode = mode.clone();
+                            session.mode = mode;
                             events.push(AppEvent::ModeChanged {
                                 session_id,
-                                new_mode: mode.clone(),
+                                new_mode: mode,
                             });
                         }
                         if let Some(s) = self.sessions.get(&session_id) {

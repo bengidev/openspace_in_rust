@@ -1,25 +1,22 @@
-//! Home shell — the post-welcome workspace.
+//! Home stage factory.
 //!
-//! The home stage is the existing [`AppShell`] presented as a stable
-//! surface for the onboarding router. We do not subclass or wrap the
-//! shell here; this module exists so the routing layer reads
+//! The home stage is the existing app shell presented as a stable
+//! surface for the onboarding router. We do not subclass or wrap
+//! the shell here; this module exists so the routing layer reads
 //! consistently:
 //!
 //! ```text
-//! onboarding-app -> onboarding-welcome -> onboarding-home   // first run
-//! onboarding-app -> onboarding-home                         // subsequent runs
+//! onboarding-app -> openspace-welcome -> openspace-home   // first run
+//! onboarding-app -> openspace-home                        // subsequent runs
 //! ```
 //!
 //! Adding new behaviour at the home stage (for example, a "welcome
 //! back" toast on the first session after onboarding) belongs here
-//! rather than in `app_shell` directly.
-
-pub use crate::app_shell::{
-    AppShell, Message as HomeMessage, shell_subscription as subscription,
-    shell_update as update, shell_view as view,
-};
+//! rather than directly in the presenter.
 
 use openspace_theme::tokens::ThemeMode;
+
+use crate::presenter::AppShell;
 
 /// Constructs the home stage with the given theme mode.
 ///

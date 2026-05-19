@@ -1,3 +1,10 @@
+//! Audit sink adapters for the home stage.
+//!
+//! [`NoopAuditSink`] silently drops all records — the production
+//! default until the persistent audit log is wired up.
+//! [`MemoryAuditSink`] captures records in insertion order so
+//! tests can assert against them.
+
 use std::sync::{Arc, Mutex};
 
 use openspace_core::audit::{AuditRecord, AuditSink};
@@ -8,7 +15,8 @@ pub struct NoopAuditSink;
 
 impl AuditSink for NoopAuditSink {
     fn emit(&self, _record: AuditRecord) {
-        // Intentionally empty: production builds drop audit records.
+        // Intentionally empty: production builds drop audit
+        // records.
     }
 }
 

@@ -1,11 +1,14 @@
-use openspace_app::command_palette::filter::filter_by_context_and_query;
-use openspace_app::command_palette::{CommandPaletteOverlay, CommandRegistry, PaletteMessage};
 use openspace_core::command_palette::{
     CommandCategory, CommandContextRequirements, CommandId, CommandMetadata, KeyboardShortcut,
     ShortcutModifiers,
 };
 use openspace_core::permission::PermissionProfile;
 use openspace_core::session::{Session, SessionDescriptor, SessionMode};
+use openspace_home::application::command_registry::CommandRegistry;
+use openspace_home::application::palette_filter::filter_by_context_and_query;
+use openspace_home::presenter::command_palette_overlay::{
+    CommandPaletteOverlay, PaletteMessage,
+};
 use std::path::PathBuf;
 
 fn make_meta(id: &str, title: &str, category: CommandCategory) -> CommandMetadata {
@@ -48,7 +51,11 @@ fn registry_merge_adds_commands() {
 fn registry_merge_overwrites_duplicates() {
     let mut reg = CommandRegistry::new();
     reg.merge(vec![make_meta("a", "Alpha", CommandCategory::Navigation)]);
-    reg.merge(vec![make_meta("a", "Alpha Updated", CommandCategory::Session)]);
+    reg.merge(vec![make_meta(
+        "a",
+        "Alpha Updated",
+        CommandCategory::Session,
+    )]);
     let all = reg.all();
     assert_eq!(all.len(), 1);
     assert_eq!(all[0].title, "Alpha Updated");
@@ -159,10 +166,7 @@ fn filter_by_context_with_session_matches_mode() {
             },
         ),
     ];
-    let session = Session::new(
-        PathBuf::from("."),
-        SessionDescriptor::new("test"),
-    );
+    let session = Session::new(PathBuf::from("."), SessionDescriptor::new("test"));
     // session defaults to Terminal mode
     let filtered = filter_by_context_and_query(&commands, Some(&session), "");
     assert_eq!(filtered.len(), 1);
@@ -308,5 +312,8 @@ fn feature_crates_expose_descriptors() {
 
     assert!(!chat.is_empty(), "chat descriptors should not be empty");
     assert!(!editor.is_empty(), "editor descriptors should not be empty");
-    assert!(!terminal.is_empty(), "terminal descriptors should not be empty");
+    assert!(
+        !terminal.is_empty(),
+        "terminal descriptors should not be empty"
+    );
 }

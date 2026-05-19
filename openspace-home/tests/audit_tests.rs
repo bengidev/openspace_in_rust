@@ -1,11 +1,16 @@
-use openspace_app::audit::{MemoryAuditSink, NoopAuditSink};
 use openspace_core::audit::{AuditEventType, AuditRecord, AuditSink, AuditStatus};
+use openspace_home::infrastructure::home_audit::{MemoryAuditSink, NoopAuditSink};
 use uuid::Uuid;
 
 #[test]
 fn noop_sink_drops_records_silently() {
     let sink = NoopAuditSink;
-    let record = AuditRecord::new(AuditEventType::System, "test", "noop_action", AuditStatus::Success);
+    let record = AuditRecord::new(
+        AuditEventType::System,
+        "test",
+        "noop_action",
+        AuditStatus::Success,
+    );
     sink.emit(record); // should not panic or error
 }
 
@@ -13,16 +18,31 @@ fn noop_sink_drops_records_silently() {
 fn memory_sink_captures_records_in_order() {
     let sink = MemoryAuditSink::new();
 
-    let r1 = AuditRecord::new(AuditEventType::Session, "user", "create", AuditStatus::Success)
-        .with_session_id(Uuid::new_v4())
-        .with_details("project=/tmp/test1");
+    let r1 = AuditRecord::new(
+        AuditEventType::Session,
+        "user",
+        "create",
+        AuditStatus::Success,
+    )
+    .with_session_id(Uuid::new_v4())
+    .with_details("project=/tmp/test1");
 
-    let r2 = AuditRecord::new(AuditEventType::Command, "palette", "open", AuditStatus::Pending)
-        .with_session_id(Uuid::new_v4())
-        .with_details("query=empty");
+    let r2 = AuditRecord::new(
+        AuditEventType::Command,
+        "palette",
+        "open",
+        AuditStatus::Pending,
+    )
+    .with_session_id(Uuid::new_v4())
+    .with_details("query=empty");
 
-    let r3 = AuditRecord::new(AuditEventType::Storage, "system", "save", AuditStatus::Failure)
-        .with_details("disk full");
+    let r3 = AuditRecord::new(
+        AuditEventType::Storage,
+        "system",
+        "save",
+        AuditStatus::Failure,
+    )
+    .with_details("disk full");
 
     sink.emit(r1.clone());
     sink.emit(r2.clone());
@@ -74,7 +94,12 @@ fn memory_sink_preserves_ordering() {
 #[test]
 fn memory_sink_clear_empties_records() {
     let sink = MemoryAuditSink::new();
-    sink.emit(AuditRecord::new(AuditEventType::System, "test", "clear", AuditStatus::Success));
+    sink.emit(AuditRecord::new(
+        AuditEventType::System,
+        "test",
+        "clear",
+        AuditStatus::Success,
+    ));
     assert_eq!(sink.len(), 1);
 
     sink.clear();
@@ -85,9 +110,14 @@ fn memory_sink_clear_empties_records() {
 #[test]
 fn audit_record_builder_methods() {
     let session_id = Uuid::new_v4();
-    let record = AuditRecord::new(AuditEventType::Permission, "admin", "grant", AuditStatus::Success)
-        .with_session_id(session_id)
-        .with_details("profile=FullAccess");
+    let record = AuditRecord::new(
+        AuditEventType::Permission,
+        "admin",
+        "grant",
+        AuditStatus::Success,
+    )
+    .with_session_id(session_id)
+    .with_details("profile=FullAccess");
 
     assert_eq!(record.event_type, AuditEventType::Permission);
     assert_eq!(record.actor, "admin");
@@ -100,7 +130,12 @@ fn audit_record_builder_methods() {
 #[test]
 fn audit_record_has_timestamp() {
     let before = std::time::SystemTime::now();
-    let record = AuditRecord::new(AuditEventType::System, "test", "timestamp", AuditStatus::Pending);
+    let record = AuditRecord::new(
+        AuditEventType::System,
+        "test",
+        "timestamp",
+        AuditStatus::Pending,
+    );
     let after = std::time::SystemTime::now();
 
     assert!(record.timestamp >= before);

@@ -1,3 +1,10 @@
+//! Pure filter used by the command palette overlay.
+//!
+//! Substring matching against the command title and id, gated by
+//! the active session's mode + permission profile. The filter is
+//! pure so it can be exercised end-to-end from unit tests without
+//! spinning up the Iced runtime.
+
 use openspace_core::command_palette::CommandMetadata;
 use openspace_core::session::Session;
 
@@ -24,21 +31,20 @@ pub fn filter_by_context_and_query<'a>(
 
 fn matches_session(meta: &CommandMetadata, session: Option<&Session>) -> bool {
     let Some(session) = session else {
-        // No session active: only commands with no mode requirement are available.
+        // No session active: only commands with no mode requirement
+        // are available.
         return meta.context.mode.is_none();
     };
 
-    if let Some(required_mode) = &meta.context.mode {
-        if *required_mode != session.mode {
+    if let Some(required_mode) = &meta.context.mode
+        && *required_mode != session.mode {
             return false;
         }
-    }
 
-    if let Some(required_profile) = &meta.context.permission_profile {
-        if *required_profile != session.permission {
+    if let Some(required_profile) = &meta.context.permission_profile
+        && *required_profile != session.permission {
             return false;
         }
-    }
 
     true
 }

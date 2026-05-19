@@ -1,10 +1,10 @@
-use openspace_app::app_router::AppRouter;
-use openspace_app::mock_features::MockFeatureRuntime;
 use openspace_core::app_command::{AppCommand, FeatureCommand, StorageCommand};
 use openspace_core::app_event::{AppEvent, FeatureLifecycleState};
 use openspace_core::core_errors::CoreError;
 use openspace_core::permission::PermissionProfile;
 use openspace_core::session::{SessionDescriptor, SessionMode};
+use openspace_home::application::app_router::AppRouter;
+use openspace_home::infrastructure::mock_feature_runtime::MockFeatureRuntime;
 
 #[test]
 fn create_session_emits_event_and_sets_active() {
@@ -14,11 +14,9 @@ fn create_session_emits_event_and_sets_active() {
         descriptor: SessionDescriptor::new("test"),
     };
     let events = router.apply(cmd);
-    assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, AppEvent::SessionCreated { .. }))
-    );
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, AppEvent::SessionCreated { .. })));
     assert!(router.active_session().is_some());
 }
 
@@ -37,11 +35,9 @@ fn switch_mode_emits_mode_changed() {
         mode: SessionMode::Chat,
     };
     let events = router.apply(cmd);
-    assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, AppEvent::ModeChanged { .. }))
-    );
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, AppEvent::ModeChanged { .. })));
     assert_eq!(router.active_session().unwrap().mode, SessionMode::Chat);
 }
 
@@ -57,11 +53,9 @@ fn close_session_removes_and_emits_closed() {
 
     let cmd = AppCommand::CloseSession { session_id };
     let events = router.apply(cmd);
-    assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, AppEvent::SessionClosed { .. }))
-    );
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, AppEvent::SessionClosed { .. })));
     assert!(router.active_session().is_none());
 }
 
@@ -108,11 +102,9 @@ fn update_permission_emits_permission_changed() {
         profile: PermissionProfile::FullAccess,
     };
     let events = router.apply(cmd);
-    assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, AppEvent::PermissionChanged { .. }))
-    );
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, AppEvent::PermissionChanged { .. })));
     assert_eq!(
         router.active_session().unwrap().permission,
         PermissionProfile::FullAccess

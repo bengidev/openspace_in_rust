@@ -1,3 +1,9 @@
+//! In-memory mock feature runtime used by routing and integration
+//! tests.
+//!
+//! Records every lifecycle hook and command dispatched against it
+//! so tests can assert on call counts and last-seen payloads.
+
 use std::sync::{Arc, Mutex};
 
 use openspace_core::app_command::FeatureCommand;
@@ -5,7 +11,7 @@ use openspace_core::core_errors::CoreError;
 use openspace_core::session::Session;
 use uuid::Uuid;
 
-use crate::feature_runtime::FeatureRuntime;
+use crate::domain::FeatureRuntime;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MockFeatureState {

@@ -1,7 +1,13 @@
+//! Merged registry of commands from all feature crates.
+//!
+//! Features publish their commands as `Vec<CommandMetadata>` via
+//! their public `command_descriptors()` function. The home shell
+//! merges them all here at construction so the palette can search
+//! across every feature's surface uniformly.
+
 use openspace_core::command_palette::{CommandId, CommandMetadata, KeyboardShortcut};
 use std::collections::HashMap;
 
-/// Merged registry of commands from all feature crates.
 #[derive(Debug, Clone, Default)]
 pub struct CommandRegistry {
     commands: HashMap<CommandId, CommandMetadata>,
@@ -13,7 +19,8 @@ impl CommandRegistry {
     }
 
     /// Merge feature descriptors into the registry.
-    /// Logs warnings for duplicate command IDs (overwrites with latest).
+    /// Logs warnings for duplicate command IDs (overwrites with
+    /// latest).
     pub fn merge(&mut self, descriptors: Vec<CommandMetadata>) {
         for meta in descriptors {
             if self.commands.contains_key(&meta.id) {

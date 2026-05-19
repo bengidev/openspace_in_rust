@@ -1,32 +1,31 @@
 use iced::alignment::{Horizontal, Vertical};
-use iced::widget::{Column, Row, button, container, mouse_area, text};
-use iced::{Element, Event, Length, Point, Size, Subscription, Task, Theme, mouse};
+use iced::widget::{button, container, mouse_area, text, Column, Row};
+use iced::{mouse, Element, Event, Length, Point, Size, Subscription, Task, Theme};
 use openspace_core::app_command::AppCommand;
 use openspace_core::session::{SessionDescriptor, SessionMode};
 use openspace_theme::theme::OpenSpaceTheme;
 use openspace_theme::tokens::*;
 use std::sync::Arc;
 
-use crate::app_router::AppRouter;
-use crate::audit::NoopAuditSink;
-use crate::center_surface::center_surface;
-use crate::command_palette::{CommandPaletteOverlay, CommandRegistry, PaletteMessage};
+use crate::application::app_router::AppRouter;
+use crate::application::command_registry::CommandRegistry;
+use crate::domain::layout::{
+    HIT_MARGIN, MIN_CENTER_WIDTH, MIN_PANEL_WIDTH, MIN_WINDOW_WIDTH, SEPARATOR_SIZE,
+    STATUS_BAR_HEIGHT, TOP_BAR_HEIGHT,
+};
+use crate::infrastructure::NoopAuditSink;
+use crate::presenter::center_surface::center_surface;
+use crate::presenter::command_palette_overlay::{CommandPaletteOverlay, PaletteMessage};
 use openspace_chat::ChatCommands;
 use openspace_core::audit::AuditSink;
 use openspace_core::command_palette::CommandDescriptorProvider;
 use openspace_editor::EditorCommands;
 use openspace_terminal::TerminalCommands;
 
-const TOP_BAR_HEIGHT: f32 = 48.0;
-const STATUS_BAR_HEIGHT: f32 = 28.0;
-const SEPARATOR_SIZE: f32 = 1.0;
-const MIN_PANEL_WIDTH: f32 = 100.0;
-const MIN_CENTER_WIDTH: f32 = 200.0;
-const HIT_MARGIN: f32 = 3.0;
-
-/// Minimum total window width so the layout does not collapse.
-/// 2 panel + center + 2 separator
-const MIN_WINDOW_WIDTH: f32 = MIN_PANEL_WIDTH * 2.0 + MIN_CENTER_WIDTH + 2.0 * SEPARATOR_SIZE;
+// Layout constants live in `home_domain::layout` and are imported
+// above so the view, the update reducer, and any cross-cutting
+// code (window size enforcement, hit testing) read from one
+// canonical source.
 
 pub struct AppShell {
     /// Preferred width = user intent (from drag resize). Not clamped.

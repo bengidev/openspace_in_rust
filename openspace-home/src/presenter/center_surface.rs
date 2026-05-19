@@ -1,3 +1,10 @@
+//! Center-surface placeholder views for each session mode.
+//!
+//! Renders a labelled placeholder per active mode (Terminal /
+//! Chat / Editor) plus an empty state when no session is active.
+//! Real per-mode content is owned by the corresponding
+//! sub-feature crates.
+
 use iced::alignment::{Horizontal, Vertical};
 use iced::widget::{container, text};
 use iced::{Element, Length, Theme};

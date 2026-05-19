@@ -1,13 +1,17 @@
+//! Runtime manager — owns the registered feature runtimes and
+//! routes activation/deactivation/dispatch through them.
+//!
+//! Sessions trigger lifecycle hooks (`on_session_activate` /
+//! `on_session_deactivate`) and feature commands flow through
+//! [`RuntimeManager::dispatch`]. The router is the single caller
+//! of these entry points, so feature lifecycle stays observable
+//! from one place.
+
 use openspace_core::app_command::FeatureCommand;
 use openspace_core::core_errors::CoreError;
 use openspace_core::session::Session;
 
-pub trait FeatureRuntime: Send {
-    fn feature_id(&self) -> &str;
-    fn on_session_activate(&mut self, session: &Session);
-    fn on_session_deactivate(&mut self, session: &Session);
-    fn handle_command(&mut self, cmd: &FeatureCommand) -> Result<(), CoreError>;
-}
+use crate::domain::FeatureRuntime;
 
 #[derive(Default)]
 pub struct RuntimeManager {

@@ -7,6 +7,7 @@ use openspace_theme::tokens::*;
 
 /// State for the command palette overlay.
 #[derive(Debug, Clone)]
+#[derive(Default)]
 pub struct CommandPaletteOverlay {
     pub visible: bool,
     pub query: String,
@@ -14,16 +15,6 @@ pub struct CommandPaletteOverlay {
     pub filtered: Vec<CommandMetadata>,
 }
 
-impl Default for CommandPaletteOverlay {
-    fn default() -> Self {
-        Self {
-            visible: false,
-            query: String::new(),
-            selected_index: 0,
-            filtered: Vec::new(),
-        }
-    }
-}
 
 /// Messages produced by the palette overlay.
 #[derive(Debug, Clone)]
@@ -58,19 +49,19 @@ impl CommandPaletteOverlay {
             PaletteMessage::QueryChanged(q) => {
                 self.query = q;
                 self.selected_index = 0;
-                self.filtered = crate::command_palette::filter::filter_by_context_and_query(
-                    all_commands,
-                    None, // context filtering happens upstream in AppShell
-                    &self.query,
-                )
-                .into_iter()
-                .cloned()
-                .collect();
+                self.filtered =
+                    crate::application::palette_filter::filter_by_context_and_query(
+                        all_commands,
+                        None, // context filtering happens upstream in AppShell
+                        &self.query,
+                    )
+                    .into_iter()
+                    .cloned()
+                    .collect();
             }
             PaletteMessage::SelectNext => {
                 if !self.filtered.is_empty() {
-                    self.selected_index =
-                        (self.selected_index + 1).min(self.filtered.len() - 1);
+                    self.selected_index = (self.selected_index + 1).min(self.filtered.len() - 1);
                 }
             }
             PaletteMessage::SelectPrevious => {
@@ -102,22 +93,24 @@ impl CommandPaletteOverlay {
             .on_submit(Message::from(PaletteMessage::Confirm))
             .padding(10)
             .width(Length::Fill)
-            .style(move |_theme: &Theme, _status: text_input::Status| text_input::Style {
-                background: iced::Background::Color(theme.background(BackgroundToken::Tertiary)),
-                border: iced::Border {
-                    radius: 6.0.into(),
-                    width: 1.0,
-                    color: theme.border(BorderToken::Default),
+            .style(
+                move |_theme: &Theme, _status: text_input::Status| text_input::Style {
+                    background: iced::Background::Color(
+                        theme.background(BackgroundToken::Tertiary),
+                    ),
+                    border: iced::Border {
+                        radius: 6.0.into(),
+                        width: 1.0,
+                        color: theme.border(BorderToken::Default),
+                    },
+                    icon: iced::Color::TRANSPARENT,
+                    placeholder: theme.foreground(ForegroundToken::Muted),
+                    value: theme.foreground(ForegroundToken::Primary),
+                    selection: theme.foreground(ForegroundToken::Accent),
                 },
-                icon: iced::Color::TRANSPARENT,
-                placeholder: theme.foreground(ForegroundToken::Muted),
-                value: theme.foreground(ForegroundToken::Primary),
-                selection: theme.foreground(ForegroundToken::Accent),
-            });
+            );
 
-        let input_row = row![input]
-            .padding(Padding::new(12.0))
-            .width(Length::Fill);
+        let input_row = row![input].padding(Padding::new(12.0)).width(Length::Fill);
 
         let results: Element<'a, Message> = if self.filtered.is_empty() && !self.query.is_empty() {
             container(
@@ -145,41 +138,45 @@ impl CommandPaletteOverlay {
 
             scrollable(column(items).spacing(2).padding(Padding::new(4.0)))
                 .height(Length::Fill)
-                .style(move |_theme: &Theme, _status: scrollable::Status| scrollable::Style {
-                    container: container::Style {
-                        background: Some(iced::Background::Color(
-                            theme.background(BackgroundToken::Secondary),
-                        )),
-                        ..Default::default()
-                    },
-                    vertical_rail: scrollable::Rail {
-                        background: Some(iced::Background::Color(
-                            theme.background(BackgroundToken::Tertiary),
-                        )),
-                        border: iced::Border::default(),
-                        scroller: scrollable::Scroller {
+                .style(
+                    move |_theme: &Theme, _status: scrollable::Status| scrollable::Style {
+                        container: container::Style {
+                            background: Some(iced::Background::Color(
+                                theme.background(BackgroundToken::Secondary),
+                            )),
+                            ..Default::default()
+                        },
+                        vertical_rail: scrollable::Rail {
+                            background: Some(iced::Background::Color(
+                                theme.background(BackgroundToken::Tertiary),
+                            )),
+                            border: iced::Border::default(),
+                            scroller: scrollable::Scroller {
+                                background: iced::Background::Color(
+                                    theme.foreground(ForegroundToken::Muted),
+                                ),
+                                border: iced::Border::default(),
+                            },
+                        },
+                        horizontal_rail: scrollable::Rail {
+                            background: None,
+                            border: iced::Border::default(),
+                            scroller: scrollable::Scroller {
+                                background: iced::Background::Color(iced::Color::TRANSPARENT),
+                                border: iced::Border::default(),
+                            },
+                        },
+                        gap: None,
+                        auto_scroll: scrollable::AutoScroll {
                             background: iced::Background::Color(
-                                theme.foreground(ForegroundToken::Muted),
+                                theme.background(BackgroundToken::Elevated),
                             ),
                             border: iced::Border::default(),
+                            shadow: iced::Shadow::default(),
+                            icon: theme.foreground(ForegroundToken::Primary),
                         },
                     },
-                    horizontal_rail: scrollable::Rail {
-                        background: None,
-                        border: iced::Border::default(),
-                        scroller: scrollable::Scroller {
-                            background: iced::Background::Color(iced::Color::TRANSPARENT),
-                            border: iced::Border::default(),
-                        },
-                    },
-                    gap: None,
-                    auto_scroll: scrollable::AutoScroll {
-                        background: iced::Background::Color(theme.background(BackgroundToken::Elevated)),
-                        border: iced::Border::default(),
-                        shadow: iced::Shadow::default(),
-                        icon: theme.foreground(ForegroundToken::Primary),
-                    },
-                })
+                )
                 .into()
         };
 
@@ -245,23 +242,23 @@ impl CommandPaletteOverlay {
         }
 
         match event {
-            Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers: _, .. }) => {
-                match key {
-                    keyboard::Key::Named(keyboard::key::Named::Escape) => {
-                        return Some(PaletteMessage::Close);
-                    }
-                    keyboard::Key::Named(keyboard::key::Named::ArrowDown) => {
-                        return Some(PaletteMessage::SelectNext);
-                    }
-                    keyboard::Key::Named(keyboard::key::Named::ArrowUp) => {
-                        return Some(PaletteMessage::SelectPrevious);
-                    }
-                    keyboard::Key::Named(keyboard::key::Named::Enter) => {
-                        return Some(PaletteMessage::Confirm);
-                    }
-                    _ => None,
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key, modifiers: _, ..
+            }) => match key {
+                keyboard::Key::Named(keyboard::key::Named::Escape) => {
+                    Some(PaletteMessage::Close)
                 }
-            }
+                keyboard::Key::Named(keyboard::key::Named::ArrowDown) => {
+                    Some(PaletteMessage::SelectNext)
+                }
+                keyboard::Key::Named(keyboard::key::Named::ArrowUp) => {
+                    Some(PaletteMessage::SelectPrevious)
+                }
+                keyboard::Key::Named(keyboard::key::Named::Enter) => {
+                    Some(PaletteMessage::Confirm)
+                }
+                _ => None,
+            },
             Event::Mouse(iced::mouse::Event::ButtonPressed(_)) => Some(PaletteMessage::Close),
             _ => None,
         }
@@ -288,13 +285,14 @@ fn palette_row<'a, Message: Clone + From<PaletteMessage> + 'a>(
             color: Some(theme.foreground(ForegroundToken::Primary)),
         });
 
-    let category_label = text(format!("{:?}", cmd.category))
-        .size(11)
-        .style(move |_theme: &Theme| text::Style {
-            color: Some(category_color),
-        });
+    let category_label =
+        text(format!("{:?}", cmd.category))
+            .size(11)
+            .style(move |_theme: &Theme| text::Style {
+                color: Some(category_color),
+            });
 
-    let shortcut_text = cmd.shortcut.as_ref().map(|s| format_shortcut(s));
+    let shortcut_text = cmd.shortcut.as_ref().map(format_shortcut);
 
     let shortcut = shortcut_text.map(|label| {
         text(label)
@@ -314,7 +312,9 @@ fn palette_row<'a, Message: Clone + From<PaletteMessage> + 'a>(
     button(row_content)
         .padding([8, 12])
         .width(Length::Fill)
-        .on_press(Message::from(PaletteMessage::CommandSelected(cmd.id.0.clone())))
+        .on_press(Message::from(PaletteMessage::CommandSelected(
+            cmd.id.0.clone(),
+        )))
         .style(move |_theme: &Theme, _status| button::Style {
             background: Some(iced::Background::Color(bg)),
             text_color: theme.foreground(ForegroundToken::Primary),
