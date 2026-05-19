@@ -28,5 +28,6 @@ serde = { version = "1.0", features = ["derive"] }
 thiserror = "2.0"
 anyhow = "1.0"
 uuid = "1.0"
+vte = "0.13"
 directories = "6.0"
 tracing = "0.1"
