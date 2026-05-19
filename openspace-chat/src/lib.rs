@@ -1,41 +1,16 @@
-pub mod chat_channels;
-pub mod chat_messages;
+//! `openspace-chat` — chat workflow feature crate.
+//!
+//! Layered along Clean Architecture lines:
+//!
+//! * [`domain`] — pure chat value types (messages, threads).
+//! * [`application`] — chat lifecycle + command catalogue.
+//! * [`infrastructure`] — provider streams + persistence.
+//! * [`presenter`] — Iced-side rendering for the chat
+//!   workflow surface.
 
-use openspace_core::command_palette::{
-    CommandCategory, CommandContextRequirements, CommandDescriptorProvider, CommandMetadata,
-    KeyboardShortcut, ShortcutModifiers,
-};
+pub mod application;
+pub mod domain;
+pub mod infrastructure;
+pub mod presenter;
 
-pub struct ChatCommands;
-
-impl CommandDescriptorProvider for ChatCommands {
-    fn command_descriptors() -> Vec<CommandMetadata> {
-        vec![
-            CommandMetadata::new("chat.new_thread", "New Chat Thread", CommandCategory::Chat)
-                .with_context(CommandContextRequirements {
-                    mode: Some(openspace_core::session::SessionMode::Chat),
-                    ..Default::default()
-                })
-                .with_shortcut(KeyboardShortcut::new(
-                    "n",
-                    ShortcutModifiers {
-                        ctrl: true,
-                        shift: false,
-                        alt: false,
-                        meta: false,
-                    },
-                )),
-            CommandMetadata::new("chat.clear_history", "Clear Chat History", CommandCategory::Chat)
-                .with_context(CommandContextRequirements {
-                    mode: Some(openspace_core::session::SessionMode::Chat),
-                    ..Default::default()
-                }),
-            CommandMetadata::new("chat.export", "Export Chat", CommandCategory::Chat)
-                .with_context(CommandContextRequirements {
-                    mode: Some(openspace_core::session::SessionMode::Chat),
-                    permission_profile: Some(openspace_core::permission::PermissionProfile::Default),
-                    ..Default::default()
-                }),
-        ]
-    }
-}
+pub use application::ChatCommands;

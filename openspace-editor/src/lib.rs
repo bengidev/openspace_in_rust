@@ -1,60 +1,16 @@
-pub mod editor_buffers;
-pub mod editor_documents;
+//! `openspace-editor` — editor mode feature crate.
+//!
+//! Layered along Clean Architecture lines:
+//!
+//! * [`domain`] — pure document/file value types.
+//! * [`application`] — buffer model + command catalogue.
+//! * [`infrastructure`] — file I/O + parser adapters.
+//! * [`presenter`] — Iced-side rendering for the editor
+//!   workspace surface.
 
-use openspace_core::command_palette::{
-    CommandCategory, CommandContextRequirements, CommandDescriptorProvider, CommandMetadata,
-    KeyboardShortcut, ShortcutModifiers,
-};
+pub mod application;
+pub mod domain;
+pub mod infrastructure;
+pub mod presenter;
 
-pub struct EditorCommands;
-
-impl CommandDescriptorProvider for EditorCommands {
-    fn command_descriptors() -> Vec<CommandMetadata> {
-        vec![
-            CommandMetadata::new("editor.new_file", "New File", CommandCategory::Editor)
-                .with_context(CommandContextRequirements {
-                    mode: Some(openspace_core::session::SessionMode::Editor),
-                    ..Default::default()
-                })
-                .with_shortcut(KeyboardShortcut::new(
-                    "n",
-                    ShortcutModifiers {
-                        ctrl: true,
-                        shift: true,
-                        alt: false,
-                        meta: false,
-                    },
-                )),
-            CommandMetadata::new("editor.save", "Save File", CommandCategory::Editor)
-                .with_context(CommandContextRequirements {
-                    mode: Some(openspace_core::session::SessionMode::Editor),
-                    focus: Some("editor".to_string()),
-                    ..Default::default()
-                })
-                .with_shortcut(KeyboardShortcut::new(
-                    "s",
-                    ShortcutModifiers {
-                        ctrl: true,
-                        shift: false,
-                        alt: false,
-                        meta: false,
-                    },
-                )),
-            CommandMetadata::new("editor.find", "Find in File", CommandCategory::Editor)
-                .with_context(CommandContextRequirements {
-                    mode: Some(openspace_core::session::SessionMode::Editor),
-                    focus: Some("editor".to_string()),
-                    ..Default::default()
-                })
-                .with_shortcut(KeyboardShortcut::new(
-                    "f",
-                    ShortcutModifiers {
-                        ctrl: true,
-                        shift: false,
-                        alt: false,
-                        meta: false,
-                    },
-                )),
-        ]
-    }
-}
+pub use application::EditorCommands;
