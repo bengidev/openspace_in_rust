@@ -67,11 +67,10 @@ fn has_cycle(graph: &HashMap<String, Vec<String>>) -> Option<Vec<String>> {
                     if let Some(cycle) = dfs(neighbor, graph, visited, rec_stack, path) {
                         return Some(cycle);
                     }
-                } else if rec_stack.contains(neighbor) {
-                    if let Some(pos) = path.iter().position(|p| p == neighbor) {
+                } else if rec_stack.contains(neighbor)
+                    && let Some(pos) = path.iter().position(|p| p == neighbor) {
                         return Some(path[pos..].to_vec());
                     }
-                }
             }
         }
 
@@ -81,11 +80,10 @@ fn has_cycle(graph: &HashMap<String, Vec<String>>) -> Option<Vec<String>> {
     }
 
     for node in graph.keys() {
-        if !visited.contains(node) {
-            if let Some(cycle) = dfs(node, graph, &mut visited, &mut rec_stack, &mut path) {
+        if !visited.contains(node)
+            && let Some(cycle) = dfs(node, graph, &mut visited, &mut rec_stack, &mut path) {
                 return Some(cycle);
             }
-        }
     }
     None
 }
